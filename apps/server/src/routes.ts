@@ -9,6 +9,11 @@ import {
   type TaskChannel,
   type TaskStatus,
 } from "@tibao/core";
+import type {
+  TikTokAuthorizedShopsData,
+  TikTokOAuthTokenData,
+  TikTokResponse,
+} from "@tibao/tiktok-api";
 import type { AppConfig } from "./config.js";
 import { isTikTokAppConfigured } from "./config.js";
 import type {
@@ -24,6 +29,13 @@ export interface RouteDependencies {
   database: TibaoDatabase;
   vault: TokenVault;
   runner: ApiRunner;
+  oauthClient?: TikTokOAuthClient;
+}
+
+export interface TikTokOAuthClient {
+  createAuthorizationUrl(state: string): string;
+  exchangeCode(authCode: string): Promise<TikTokResponse<TikTokOAuthTokenData>>;
+  listAuthorizedShops(accessToken: string): Promise<TikTokResponse<TikTokAuthorizedShopsData>>;
 }
 
 function text(value: unknown): string {
@@ -228,16 +240,108 @@ function verifyExtension(
 }
 
 export async function registerRoutes(app: FastifyInstance, deps: RouteDependencies): Promise<void> {
-  const { config, database, vault, runner } = deps;
+  const { config, database, vault, runner, oauthClient } = deps;
+  const oauthConfigured = Boolean(oauthClient) && isTikTokAppConfigured(config) && vault.available;
 
   app.get("/api/health", async () => ({
     ok: true,
     apiConfigured: isTikTokAppConfigured(config) && vault.available,
+    oauthConfigured,
+    oauthCallbackPath: "/api/oauth/tiktok/callback",
     appCredentialsConfigured: isTikTokAppConfigured(config),
     tokenEncryptionConfigured: vault.available,
     extensionConfigured: Boolean(config.extensionSharedKey),
     expiredLeasesRecovered: database.resetExpiredLeases(),
   }));
+
+  app.get("/api/oauth/tiktok/start", async (_request, reply) => {
+    if (!oauthConfigured || !oauthClient) {
+      return reply.code(503).send({
+        error: "请先配置 TIKTOK_APP_KEY、TIKTOK_APP_SECRET 和 TOKEN_ENCRYPTION_KEY",
+      });
+    }
+    const state = database.createOAuthState();
+    return reply
+      .header("cache-control", "no-store")
+      .header("referrer-policy", "no-referrer")
+      .redirect(oauthClient.createAuthorizationUrl(state));
+  });
+
+  app.get<{
+    Querystring: {
+      code?: string;
+      auth_code?: string;
+      state?: string;
+      error?: string;
+      error_description?: string;
+    };
+  }>(
+    "/api/oauth/tiktok/callback",
+    { logLevel: "silent" },
+    async (request, reply) => {
+      const redirect = (status: "success" | "error", values: Record<string, string> = {}) => {
+        const search = new URLSearchParams({ oauth: status, ...values });
+        return reply
+          .header("cache-control", "no-store")
+          .header("referrer-policy", "no-referrer")
+          .redirect(`/?${search.toString()}`);
+      };
+
+      if (!oauthConfigured || !oauthClient) {
+        return redirect("error", { message: "服务端 OAuth 配置不完整" });
+      }
+      const state = text(request.query.state);
+      if (!state || !database.consumeOAuthState(state)) {
+        return redirect("error", { message: "OAuth state 无效、已使用或已过期，请重新授权" });
+      }
+      const providerError = text(request.query.error_description) || text(request.query.error);
+      if (providerError) {
+        return redirect("error", { message: providerError.slice(0, 300) });
+      }
+      const authCode = text(request.query.code) || text(request.query.auth_code);
+      if (!authCode) {
+        return redirect("error", { message: "TikTok 回调缺少 auth_code" });
+      }
+
+      try {
+        const token = await oauthClient.exchangeCode(authCode);
+        const authorized = await oauthClient.listAuthorizedShops(token.data.access_token);
+        const sellerRegion = text(token.data.seller_base_region).toUpperCase();
+        const shops = authorized.data.shops ?? [];
+        const mxShops = [
+          ...new Map(
+            shops
+              .filter((shop) => {
+                const region = text(shop.region).toUpperCase();
+                return region === "MX" || (!region && sellerRegion === "MX");
+              })
+              .map((shop) => [text(shop.cipher), shop]),
+          ).values(),
+        ].filter((shop) => Boolean(text(shop.cipher)));
+        if (mxShops.length === 0) {
+          const regions = [...new Set(shops.map((shop) => text(shop.region)).filter(Boolean))];
+          const suffix = regions.length > 0 ? `（授权店铺地区：${regions.join("、")}）` : "";
+          throw new Error(`本次授权没有返回墨西哥（MX）店铺${suffix}`);
+        }
+
+        const encryptedAccessToken = vault.encrypt(token.data.access_token);
+        for (const shop of mxShops) {
+          database.createShop({
+            name:
+              text(shop.name) ||
+              text(token.data.seller_name) ||
+              `TikTok MX ${text(shop.code) || text(shop.id) || text(shop.cipher).slice(-6)}`,
+            shopCipher: text(shop.cipher),
+            encryptedAccessToken,
+          });
+        }
+        return redirect("success", { shops: String(mxShops.length) });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "TikTok OAuth 处理失败";
+        return redirect("error", { message: message.slice(0, 300) });
+      }
+    },
+  );
 
   app.get("/api/shops", async () => ({ shops: database.listShops() }));
 

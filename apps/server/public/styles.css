@@ -39,6 +39,7 @@ input, select, textarea { width: 100%; border: 1px solid #cbd3dc; border-radius:
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 110, 104, .1); }
 textarea { resize: vertical; line-height: 1.5; }
 button, .button-link { border: 0; border-radius: 9px; padding: 10px 13px; cursor: pointer; text-decoration: none; font-weight: 750; }
+button:disabled { cursor: not-allowed; opacity: .5; }
 .primary { background: var(--accent); color: white; }
 .primary:hover { background: var(--accent-dark); }
 .ghost, .button-link { background: #eef2f5; color: #354250; }
@@ -49,6 +50,14 @@ button, .button-link { border: 0; border-radius: 9px; padding: 10px 13px; cursor
 .shop code { color: var(--muted); }
 .shop-layout { display: grid; grid-template-columns: minmax(300px, 460px) minmax(0, 1fr); gap: 32px; align-items: start; }
 .shop-layout .shop-list { margin-top: 0; }
+.oauth-box { display: grid; gap: 11px; padding: 15px; margin-bottom: 14px; border: 1px solid #b8ddd9; border-radius: 11px; background: #effaf8; }
+.oauth-box h3 { display: inline; margin: 0 0 0 8px; font-size: 16px; }
+.oauth-box > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.oauth-box .hint { margin: 0; }
+.callback-address { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.callback-address code { overflow-wrap: anywhere; padding: 8px 9px; border: 1px solid #cce5e2; border-radius: 7px; background: white; color: #324452; }
+.form-divider { display: flex; align-items: center; gap: 10px; margin: 15px 0; color: var(--muted); font-size: 11px; }
+.form-divider::before, .form-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .match-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto; gap: 10px; align-items: end; }
 .align-end { align-self: end; white-space: nowrap; }
 .manual-product-label { margin-top: 14px; }

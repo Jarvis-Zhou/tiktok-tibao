@@ -10,6 +10,7 @@
 - Excel / CSV 导入，中英文表头归一化，文件内和历史任务双重去重。
 - SQLite 持久化任务队列；支持失败重试、租约超时恢复、显式切换执行通道。
 - TikTok Shop Open API HMAC-SHA256 签名、保守串行限流、瞬时错误重试、request ID 记录。
+- TikTok Shop OAuth 授权入口与回调：一次性 state 校验、授权码换 Token、自动发现并导入 MX 店铺。
 - 店铺 Access Token 使用 AES-256-GCM 加密存储。
 - 店铺商品分页读取；支持在管理页勾选商品或直接粘贴 Product ID。
 - 同时拉取 PRODUCT / KEYWORD / CATEGORY 机会，读取机会详情并进行本地硬过滤与可解释评分。
@@ -42,11 +43,19 @@ TIKTOK_APP_SECRET=你的 app_secret
 TOKEN_ENCRYPTION_KEY=至少32位随机字符串
 ```
 
+并在 TikTok Shop Partner Center 的应用配置中登记回调地址：
+
+```text
+http://127.0.0.1:3210/api/oauth/tiktok/callback
+```
+
+如果不是用默认地址打开管理页，把上面的协议、域名和端口替换成页面实际 Origin；页面会直接显示应登记的完整回调地址。回调地址由 Partner Center 固定配置，授权入口只发送 `app_key` 和一次性 `state`。
+
 建议用 `openssl rand -hex 32` 分别生成两个随机值。不要把真实密钥、Access Token 或 `.env` 发到群里或提交到 Git。
 
 首次验证顺序：
 
-1. 在页面添加真实 MX 店铺的 `shop_cipher` 与 OAuth Access Token。
+1. 点击“登录 TikTok Shop 并授权”；回调成功后会自动换取 Access Token，并从 `GET /authorization/202309/shops` 导入 MX 店铺的 `shop_cipher`。也可保留手动录入作为备用。
 2. 点击“测试 API”，只调用 `List Opportunity`。
 3. 点击“读取店铺商品”，先选择 1 个商品并运行机会匹配。
 4. 逐条检查匹配理由，只勾选明确正确的商品—机会组合。
@@ -65,6 +74,16 @@ TOKEN_ENCRYPTION_KEY=至少32位随机字符串
 6. 高置信度只显示“推荐候选”，不会自动勾选；运营人员明确确认后才创建现有 A/C 任务批次。
 
 单次最多选择 20 个商品，每类机会最多保留 5 个候选，每个商品最多展示 8 个可提报结果。相同类目的机会查询在单次请求中复用，所有读取请求串行执行，并由 `MATCH_READ_INTERVAL_MS` 控制最小间隔。
+
+## OAuth 回调流程
+
+1. 管理页请求 `/api/oauth/tiktok/start`，服务生成 10 分钟有效且只能使用一次的随机 `state`。
+2. 浏览器跳转到 TikTok Shop 授权页；TikTok 按 Partner Center 中登记的地址回调 `/api/oauth/tiktok/callback`。
+3. 服务校验并立即消费 `state`，使用回调中的 `code` / `auth_code` 调用 `GET https://auth.tiktok-shops.com/api/v2/token/get`。
+4. 服务使用 Access Token 调用 `GET /authorization/202309/shops`，只导入 `region=MX` 的店铺，并将 Token 用 AES-256-GCM 加密后写入 SQLite。
+5. 浏览器回到管理页，只显示成功数量或错误信息；Access Token、App Secret 与授权码不会返回前端。
+
+取消授权、state 过期或授权账号中没有 MX 店铺时不会写入店铺。当前服务只监听本机回环地址；不要为了 OAuth 回调直接把未鉴权的管理页长期暴露到公网。
 
 ## 导入格式
 
@@ -123,6 +142,9 @@ npm run build
 
 ## 官方接口
 
+- `GET https://auth.tiktok-shops.com/oauth/authorize`（OAuth 授权）
+- `GET https://auth.tiktok-shops.com/api/v2/token/get`（授权码换 Token）
+- `GET /authorization/202309/shops`（读取 Shop Cipher）
 - `POST /product/202309/products/search`（版本可用 `TIKTOK_PRODUCT_API_VERSION` 调整）
 - `GET /product/202309/products/{product_id}`
 - `POST /product/202604/opportunities/query`
@@ -139,7 +161,7 @@ npm run build
 
 ## MVP 边界
 
-- 当前通过管理页手动录入 OAuth Access Token，尚未实现 OAuth 回调与 Token 自动刷新。
+- 已实现 OAuth 回调、Access Token 加密保存和 MX Shop Cipher 自动发现；Refresh Token 自动续期尚未接入，Token 过期后需重新授权。
 - 商品目录与商品详情使用 TikTok Shop Product API `202309` 版本；上线前应使用目标 Partner App 在 MX 店铺沙箱/小流量环境核对该版本和授权 scope。
 - Chrome 插件只转发归一化后的商品/机会字段，不转发原始响应、Cookie、请求头或 Token。Seller Center 内部响应字段改版后可能需要更新归一化规则。
 - 服务默认只监听 `127.0.0.1`，没有公网登录鉴权；不要改为 `0.0.0.0` 暴露到互联网。

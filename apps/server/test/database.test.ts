@@ -62,6 +62,24 @@ test("encrypts tokens and persists a deduplicated task queue", () => {
   }
 });
 
+test("stores OAuth state as a single-use expiring value", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-oauth-state-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  try {
+    const state = database.createOAuthState();
+    assert.equal(database.consumeOAuthState(state), true);
+    assert.equal(database.consumeOAuthState(state), false);
+
+    const expired = database.createOAuthState(-1);
+    assert.equal(database.consumeOAuthState(expired), false);
+    const rows = database.raw.prepare("SELECT state_hash FROM oauth_states").all();
+    assert.equal(rows.some((row) => String((row as { state_hash: unknown }).state_hash) === state), false);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("upserts extension-captured products by shop and product ID", () => {
   const directory = mkdtempSync(join(tmpdir(), "tibao-products-test-"));
   const database = new TibaoDatabase(join(directory, "queue.sqlite"));

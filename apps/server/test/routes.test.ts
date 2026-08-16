@@ -9,6 +9,7 @@ import { TibaoDatabase } from "../src/database.js";
 import { isAllowedCaptureSource, registerRoutes } from "../src/routes.js";
 import { ApiRunner } from "../src/runner.js";
 import { TokenVault } from "../src/token-vault.js";
+import type { TikTokOAuthClient } from "../src/routes.js";
 
 test("allows trusted Seller Center and fixture sources without accepting lookalike hosts", () => {
   assert.equal(
@@ -31,6 +32,99 @@ test("allows trusted Seller Center and fixture sources without accepting lookali
     false,
   );
   assert.equal(isAllowedCaptureSource("https://example.com/products"), false);
+});
+
+test("completes OAuth callback once and imports only authorized MX shops", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-oauth-routes-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const vault = new TokenVault("a-test-key-that-is-long-enough");
+  const app = Fastify();
+  const config: AppConfig = {
+    host: "127.0.0.1",
+    port: 3210,
+    databasePath: join(directory, "queue.sqlite"),
+    publicDirectory: directory,
+    tiktokAppKey: "app",
+    tiktokAppSecret: "secret",
+    tiktokApiBaseUrl: "https://example.test",
+    tiktokProductApiVersion: "202309",
+    tokenEncryptionKey: "a-test-key-that-is-long-enough",
+    extensionSharedKey: "extension-key",
+    apiMinIntervalMs: 1,
+    matchReadIntervalMs: 1,
+    apiMaxAttempts: 1,
+    taskLeaseMinutes: 30,
+  };
+  let exchangedCodes = 0;
+  const oauthClient: TikTokOAuthClient = {
+    createAuthorizationUrl: (state) => `https://auth.example.test/oauth?state=${state}`,
+    exchangeCode: async (authCode) => {
+      exchangedCodes += 1;
+      assert.equal(authCode, "callback-code");
+      return {
+        data: {
+          access_token: "oauth-access-token",
+          seller_name: "Seller MX",
+          seller_base_region: "MX",
+        },
+        requestId: "token-request",
+      };
+    },
+    listAuthorizedShops: async (accessToken) => {
+      assert.equal(accessToken, "oauth-access-token");
+      return {
+        data: {
+          shops: [
+            { cipher: "mx-cipher", code: "MX001", name: "Mexico Shop", region: "MX" },
+            { cipher: "us-cipher", code: "US001", name: "US Shop", region: "US" },
+          ],
+        },
+        requestId: "shops-request",
+      };
+    },
+  };
+  const runner = { configured: true } as unknown as ApiRunner;
+
+  try {
+    await registerRoutes(app, { config, database, vault, runner, oauthClient });
+    const start = await app.inject({ method: "GET", url: "/api/oauth/tiktok/start" });
+    assert.equal(start.statusCode, 302);
+    const authorizationUrl = new URL(start.headers.location ?? "");
+    const state = authorizationUrl.searchParams.get("state");
+    assert.ok(state);
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/api/oauth/tiktok/callback?code=callback-code&state=wrong-state",
+    });
+    assert.equal(invalid.statusCode, 302);
+    assert.match(invalid.headers.location ?? "", /oauth=error/);
+    assert.equal(exchangedCodes, 0);
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/api/oauth/tiktok/callback?code=callback-code&state=${encodeURIComponent(state)}`,
+    });
+    assert.equal(callback.statusCode, 302);
+    assert.equal(callback.headers.location, "/?oauth=success&shops=1");
+    assert.equal(exchangedCodes, 1);
+    const shops = database.listShops();
+    assert.equal(shops.length, 1);
+    assert.equal(shops[0]?.shopCipher, "mx-cipher");
+    const saved = database.getShop(shops[0]?.id ?? "");
+    assert.equal(vault.decrypt(saved?.encryptedAccessToken ?? ""), "oauth-access-token");
+
+    const replay = await app.inject({
+      method: "GET",
+      url: `/api/oauth/tiktok/callback?code=callback-code&state=${encodeURIComponent(state)}`,
+    });
+    assert.match(replay.headers.location ?? "", /oauth=error/);
+    assert.equal(exchangedCodes, 1);
+  } finally {
+    await app.close();
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("requires explicit confirmation before creating a matched batch", async () => {

@@ -33,13 +33,24 @@
           <div class="section-title">
             <div><p class="step">01</p><h2>连接墨西哥店铺</h2></div>
           </div>
+          <div class="oauth-box">
+            <div><span class="badge">推荐</span><h3>OAuth 自动连接</h3></div>
+            <p>登录 TikTok Shop 完成授权后，服务会自动换取 Access Token、读取 MX 店铺的 Shop Cipher 并加密保存。</p>
+            <div class="callback-address">
+              <span>Partner Center 回调地址</span>
+              <code id="oauth-callback-url">正在读取…</code>
+            </div>
+            <button class="primary" id="oauth-connect" type="button" disabled>登录 TikTok Shop 并授权</button>
+            <p id="oauth-status" class="hint">正在检查 OAuth 配置…</p>
+          </div>
+          <div class="form-divider"><span>或手动录入 / 创建插件店铺</span></div>
           <form id="shop-form" class="stack">
             <label>店铺名称<input name="name" required placeholder="例如：MX 主店" /></label>
             <label>Shop Cipher（仅 API 通道需要）<input name="shopCipher" autocomplete="off" /></label>
             <label>Access Token（仅 API 通道需要）<input name="accessToken" type="password" autocomplete="off" /></label>
             <button class="primary" type="submit">保存店铺</button>
           </form>
-          <p class="hint">只用 Chrome 插件时仅填写店铺名称；使用 API 时，Shop Cipher 与 Token 必须同时填写，Token 会在本机加密保存。</p>
+          <p class="hint">只用 Chrome 插件时仅填写店铺名称；手动使用 API 时，Shop Cipher 与 Token 必须同时填写。OAuth 和手动录入的 Token 都只会在本机加密保存。</p>
           </div>
           <div id="shops" class="shop-list"></div>
         </div>

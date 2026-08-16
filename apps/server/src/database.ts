@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -244,6 +244,12 @@ export class TibaoDatabase {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS oauth_states (
+        state_hash TEXT PRIMARY KEY,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS captured_products (
         shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
         product_id TEXT NOT NULL,
@@ -291,6 +297,7 @@ export class TibaoDatabase {
       CREATE INDEX IF NOT EXISTS idx_tasks_batch_status ON tasks(batch_id, status);
       CREATE INDEX IF NOT EXISTS idx_tasks_channel_status ON tasks(channel, status, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(status, lease_expires_at);
+      CREATE INDEX IF NOT EXISTS idx_oauth_states_expiry ON oauth_states(expires_at);
       CREATE INDEX IF NOT EXISTS idx_captured_products_updated
         ON captured_products(shop_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_captured_opportunities_updated
@@ -312,6 +319,27 @@ export class TibaoDatabase {
         this.raw.exec(`ALTER TABLE captured_products ADD COLUMN ${name} ${definition}`);
       }
     }
+  }
+
+  createOAuthState(ttlMs = 10 * 60 * 1_000): string {
+    const state = randomBytes(32).toString("base64url");
+    const stateHash = createHash("sha256").update(state, "utf8").digest("hex");
+    const createdAt = nowIso();
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    this.raw.prepare("DELETE FROM oauth_states WHERE expires_at <= ?").run(createdAt);
+    this.raw
+      .prepare("INSERT INTO oauth_states (state_hash, expires_at, created_at) VALUES (?, ?, ?)")
+      .run(stateHash, expiresAt, createdAt);
+    return state;
+  }
+
+  consumeOAuthState(state: string): boolean {
+    if (!state) return false;
+    const stateHash = createHash("sha256").update(state, "utf8").digest("hex");
+    const result = this.raw
+      .prepare("DELETE FROM oauth_states WHERE state_hash = ? AND expires_at > ?")
+      .run(stateHash, nowIso());
+    return result.changes === 1;
   }
 
   createShop(input: {

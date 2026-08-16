@@ -55,6 +55,27 @@ async function loadHealth() {
   ];
   $("#health").textContent = labels.join(" · ");
   $("#health").className = `health ${ready ? "ok" : "warn"}`;
+  const oauthButton = $("#oauth-connect");
+  oauthButton.disabled = !health.oauthConfigured;
+  $("#oauth-status").textContent = health.oauthConfigured
+    ? "OAuth 已就绪；授权页返回后会自动添加该账号下的 MX 店铺。"
+    : "请先在 .env 配置 App Key、App Secret 与 Token 加密密钥，然后重启服务。";
+  $("#oauth-callback-url").textContent = new URL(
+    health.oauthCallbackPath || "/api/oauth/tiktok/callback",
+    window.location.origin,
+  ).toString();
+}
+
+function showOAuthResult() {
+  const search = new URLSearchParams(window.location.search);
+  const result = search.get("oauth");
+  if (!result) return;
+  if (result === "success") {
+    toast(`OAuth 授权成功，已连接 ${search.get("shops") || "1"} 个 MX 店铺`);
+  } else {
+    toast(search.get("message") || "OAuth 授权失败，请重试", true);
+  }
+  window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
 }
 
 function shopOptions(selectedValue) {
@@ -339,6 +360,8 @@ document.addEventListener("click", async (event) => {
     button.disabled = true;
     if (button.id === "load-products") {
       await loadProducts(false);
+    } else if (button.id === "oauth-connect") {
+      window.location.assign("/api/oauth/tiktok/start");
     } else if (button.id === "load-more-products") {
       await loadProducts(true);
     } else if (button.id === "match-products") {
@@ -392,4 +415,6 @@ $("#status-filter").innerHTML += [
 ].map((status) => `<option value="${status}">${status}</option>`).join("");
 $("#status-filter").addEventListener("change", loadTasks);
 
-refresh().catch((error) => toast(error.message, true));
+refresh()
+  .then(showOAuthResult)
+  .catch((error) => toast(error.message, true));

@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
+import { TikTokShopAuthClient } from "@tibao/tiktok-api";
 import { loadConfig, loadRootEnvironment } from "./config.js";
 import { TibaoDatabase } from "./database.js";
 import { registerRoutes } from "./routes.js";
@@ -13,6 +14,11 @@ const config = loadConfig();
 const database = new TibaoDatabase(config.databasePath);
 const vault = new TokenVault(config.tokenEncryptionKey);
 const runner = new ApiRunner(config, database, vault);
+const oauthClient = new TikTokShopAuthClient({
+  appKey: config.tiktokAppKey,
+  appSecret: config.tiktokAppSecret,
+  apiBaseUrl: config.tiktokApiBaseUrl,
+});
 const app = Fastify({ logger: true, bodyLimit: 6 * 1024 * 1024 });
 
 await app.register(cors, {
@@ -31,7 +37,7 @@ await app.register(cors, {
 await app.register(multipart, {
   limits: { files: 1, fileSize: 5 * 1024 * 1024, fields: 10 },
 });
-await registerRoutes(app, { config, database, vault, runner });
+await registerRoutes(app, { config, database, vault, runner, oauthClient });
 await app.register(staticPlugin, {
   root: config.publicDirectory,
   prefix: "/",
