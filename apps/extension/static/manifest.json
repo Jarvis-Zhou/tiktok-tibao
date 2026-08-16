@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tibao · TikTok Shop 商品机会提报",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "从 Seller Center 采集商品与机会快照，在本地匹配后辅助执行批量提报。",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": [

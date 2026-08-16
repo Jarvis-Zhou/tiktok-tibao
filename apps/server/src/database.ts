@@ -162,6 +162,7 @@ function capturedOpportunityFromRow(row: SqlRow): CapturedOpportunity {
     id: String(row.opportunity_id),
     title: String(row.title),
     type: String(row.type),
+    requirementsVerified: Boolean(row.requirements_verified),
     status: row.status === null ? null : String(row.status),
     active: row.active === null ? null : Boolean(row.active),
     expired: Boolean(row.expired),
@@ -278,6 +279,7 @@ export class TibaoDatabase {
         opportunity_id TEXT NOT NULL,
         title TEXT NOT NULL,
         type TEXT NOT NULL,
+        requirements_verified INTEGER NOT NULL DEFAULT 0,
         status TEXT,
         active INTEGER,
         expired INTEGER NOT NULL,
@@ -330,6 +332,17 @@ export class TibaoDatabase {
       if (!capturedProductColumns.has(name)) {
         this.raw.exec(`ALTER TABLE captured_products ADD COLUMN ${name} ${definition}`);
       }
+    }
+
+    const capturedOpportunityColumns = new Set(
+      (this.raw.prepare("PRAGMA table_info(captured_opportunities)").all() as SqlRow[]).map((row) =>
+        String(row.name),
+      ),
+    );
+    if (!capturedOpportunityColumns.has("requirements_verified")) {
+      this.raw.exec(
+        "ALTER TABLE captured_opportunities ADD COLUMN requirements_verified INTEGER NOT NULL DEFAULT 0",
+      );
     }
   }
 
@@ -522,14 +535,15 @@ export class TibaoDatabase {
     const timestamp = nowIso();
     const statement = this.raw.prepare(`
       INSERT INTO captured_opportunities (
-        shop_id, opportunity_id, title, type, status, active, expired, fulfilled,
+        shop_id, opportunity_id, title, type, requirements_verified, status, active, expired, fulfilled,
         category_ids_json, category_names_json, brand_names_json, keywords_json,
         allowed_product_statuses_json, reference_price, min_price, max_price,
         currency, source_url, captured_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(shop_id, opportunity_id) DO UPDATE SET
         title = excluded.title,
         type = excluded.type,
+        requirements_verified = excluded.requirements_verified,
         status = excluded.status,
         active = excluded.active,
         expired = excluded.expired,
@@ -555,6 +569,7 @@ export class TibaoDatabase {
           opportunity.id,
           opportunity.title,
           opportunity.type,
+          Number(opportunity.requirementsVerified === true),
           opportunity.status,
           opportunity.active === null ? null : Number(opportunity.active),
           Number(opportunity.expired),
@@ -591,6 +606,15 @@ export class TibaoDatabase {
         )
         .all(shopId, Math.min(Math.max(limit, 1), 10_000)) as SqlRow[]
     ).map(capturedOpportunityFromRow);
+  }
+
+  getCapturedOpportunity(shopId: string, opportunityId: string): CapturedOpportunity | null {
+    const row = this.raw
+      .prepare(
+        "SELECT * FROM captured_opportunities WHERE shop_id = ? AND opportunity_id = ?",
+      )
+      .get(shopId, opportunityId) as SqlRow | undefined;
+    return row ? capturedOpportunityFromRow(row) : null;
   }
 
   createBatch(input: {

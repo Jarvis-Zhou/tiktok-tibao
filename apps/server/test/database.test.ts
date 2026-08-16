@@ -155,6 +155,7 @@ test("upserts extension-captured products by shop and product ID", () => {
           id: "7345678901234567890",
           title: "Organización del hogar",
           type: "CATEGORY",
+          requirementsVerified: true,
           status: "ACTIVE",
           active: true,
           expired: false,
@@ -174,6 +175,7 @@ test("upserts extension-captured products by shop and product ID", () => {
     assert.deepEqual(opportunityResult, { total: 1, inserted: 1, updated: 0 });
     const opportunities = database.listCapturedOpportunities(shop.id);
     assert.equal(opportunities[0]?.id, "7345678901234567890");
+    assert.equal(opportunities[0]?.requirementsVerified, true);
     assert.deepEqual(opportunities[0]?.brandNames, ["Casa MX"]);
   } finally {
     database.close();

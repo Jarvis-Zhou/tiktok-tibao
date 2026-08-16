@@ -125,6 +125,7 @@ function opportunityQuality(opportunity: CollectedOpportunity): number {
   return [
     opportunity.title && opportunity.title !== opportunity.id,
     opportunity.type,
+    opportunity.requirementsVerified,
     opportunity.status,
     opportunity.active !== null,
     opportunity.categoryIds.length,

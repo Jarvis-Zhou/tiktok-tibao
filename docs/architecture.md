@@ -4,10 +4,13 @@
 Selected products / Product IDs
     │
     ▼
-product detail → opportunity query/detail → hard filters → explainable score
+product detail → opportunity query/detail → fail-closed filters → score ≥ 75
                                                      │
                                                      ▼
                                               operator confirmation
+                                                     │
+                                                     ▼
+                                               server revalidation
                                                      │
 Excel / CSV ───────────────→ normalize → validate → idempotency → SQLite task ledger
                                       │
@@ -33,7 +36,7 @@ Excel / CSV ───────────────→ normalize → valid
 
 The database has a unique constraint on `(shop_id, opportunity_id, product_id)`. A task has exactly one active channel. Switching channels is permitted only from non-running states and resets it to `ready`; no automatic API-to-extension fallback exists.
 
-Matching is read-only until the operator checks concrete product-opportunity pairs. The server re-fetches product details, removes explicit category/brand/status/expiry conflicts, checks both the local ledger and TikTok submission records, then creates tasks through the same batch/idempotency boundary as spreadsheet imports.
+Matching is read-only until the operator checks concrete product-opportunity pairs. Missing opportunity rules, unknown status/category, detail-fetch failures, price-range conflicts, keyword conflicts, low scores, and prior submissions fail closed. The server revalidates selected pairs before creating a batch. API tasks fetch fresh product and opportunity details again immediately before submission; extension tasks require a verified local snapshot no older than 24 hours.
 
 ## Secret boundary
 
@@ -50,7 +53,8 @@ ready → running → submitted → pending_review → approved/rejected
           ├──────────────┘ └→ failed
           └→ failed
 
-failed/rejected/paused → ready (explicit retry)
+failed/paused → ready (explicit retry)
+rejected → re-capture and re-match (no direct retry)
 ```
 
 Running tasks use a lease. If the process or popup disappears, an expired lease returns the task to `ready` instead of creating a second task.

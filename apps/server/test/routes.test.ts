@@ -188,6 +188,15 @@ test("requires explicit confirmation before creating a matched batch", async () 
   const runner = {
     configured: true,
     startBatch: () => false,
+    validateMatchSelections: async (
+      _shopId: string,
+      selections: Array<{ productId: string; opportunityId: string; channel: "api" | "extension" }>,
+    ) => {
+      const issues = selections
+        .filter((selection) => selection.opportunityId === "opp-unsafe")
+        .map((selection) => ({ ...selection, message: "安全复核未通过" }));
+      return { safe: issues.length === 0, issues };
+    },
   } as unknown as ApiRunner;
 
   try {
@@ -208,6 +217,20 @@ test("requires explicit confirmation before creating a matched batch", async () 
     });
     assert.equal(unconfirmed.statusCode, 400);
 
+    const unsafe = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches/batch",
+      payload: {
+        shopId: shop.id,
+        confirmed: true,
+        selections: [
+          { productId: "product-1", opportunityId: "opp-unsafe", channel: "extension" },
+        ],
+      },
+    });
+    assert.equal(unsafe.statusCode, 409);
+    assert.equal(database.listBatches().length, 0);
+
     const confirmed = await app.inject({
       method: "POST",
       url: "/api/opportunity-matches/batch",
@@ -220,7 +243,21 @@ test("requires explicit confirmation before creating a matched batch", async () 
     assert.equal(confirmed.statusCode, 201);
     const body = confirmed.json();
     assert.equal(body.batch.validRows, 1);
-    assert.equal(database.listTasks({ batchId: body.batch.id })[0]?.channel, "extension");
+    const createdTask = database.listTasks({ batchId: body.batch.id })[0];
+    assert.equal(createdTask?.channel, "extension");
+    database.completeTask(createdTask?.id ?? "", { status: "rejected" });
+    const rejectedRetry = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${createdTask?.id}/retry`,
+    });
+    assert.equal(rejectedRetry.statusCode, 409);
+    const rejectedSwitch = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${createdTask?.id}/channel`,
+      payload: { channel: "api" },
+    });
+    assert.equal(rejectedSwitch.statusCode, 409);
+    assert.equal(database.getTask(createdTask?.id ?? "")?.status, "rejected");
   } finally {
     await app.close();
     database.close();
@@ -379,6 +416,7 @@ test("imports extension snapshots, paginates all products and matches without AP
             id: "7345678901234567890",
             title: "Organización del hogar",
             type: "CATEGORY",
+            requirementsVerified: true,
             status: "ACTIVE",
             active: true,
             expired: false,
@@ -393,13 +431,31 @@ test("imports extension snapshots, paginates all products and matches without AP
             maxPrice: 400,
             currency: "MXN",
           },
+          {
+            id: "7345678901234567891",
+            title: "Resumen incompleto",
+            type: "CATEGORY",
+            status: "ACTIVE",
+            active: true,
+            expired: false,
+            fulfilled: false,
+            categoryIds: ["601234"],
+            categoryNames: ["Organizadores de cocina"],
+            brandNames: [],
+            keywords: ["organizador", "cocina"],
+            allowedProductStatuses: ["LIVE"],
+            referencePrice: 310,
+            minPrice: null,
+            maxPrice: null,
+            currency: "MXN",
+          },
         ],
       },
     });
     assert.equal(imported.statusCode, 201);
     assert.deepEqual(imported.json().result, {
       products: { total: 106, inserted: 106, updated: 0 },
-      opportunities: { total: 1, inserted: 1, updated: 0 },
+      opportunities: { total: 2, inserted: 2, updated: 0 },
     });
 
     const firstPage = await app.inject({
@@ -433,8 +489,56 @@ test("imports extension snapshots, paginates all products and matches without AP
     });
     assert.equal(matched.statusCode, 200);
     assert.equal(matched.json().source, "extension");
+    assert.equal(matched.json().candidatePairCount, 2);
+    assert.equal(matched.json().blockedPairCount, 1);
+    assert.equal(matched.json().matches.length, 1);
     assert.equal(matched.json().matches[0].opportunity.id, "7345678901234567890");
     assert.equal(matched.json().matches[0].eligible, true);
+
+    const unsafeBatch = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches/batch",
+      payload: {
+        shopId: shop.id,
+        confirmed: true,
+        selections: [
+          {
+            productId: mainProduct.id,
+            opportunityId: "7345678901234567891",
+            channel: "extension",
+          },
+        ],
+      },
+    });
+    assert.equal(unsafeBatch.statusCode, 409);
+
+    const legacyBatch = database.createBatch({
+      filename: "legacy-unsafe.json",
+      source: "test",
+      validRows: [
+        {
+          input: {
+            sourceRow: 2,
+            shopId: shop.id,
+            productId: mainProduct.id,
+            opportunityId: "7345678901234567891",
+            channel: "extension",
+          },
+          key: "legacy-unsafe",
+        },
+      ],
+      invalidRows: [],
+      totalRows: 1,
+    });
+    const nextTask = await app.inject({
+      method: "GET",
+      url: `/api/extension/tasks/next?shopId=${encodeURIComponent(shop.id)}`,
+      headers: { "x-extension-key": "extension-key" },
+    });
+    assert.equal(nextTask.statusCode, 204);
+    const pausedTask = database.listTasks({ batchId: legacyBatch.id })[0];
+    assert.equal(pausedTask?.status, "paused");
+    assert.equal(pausedTask?.errorCode, "LOCAL_ELIGIBILITY_CHECK_FAILED");
   } finally {
     await app.close();
     database.close();

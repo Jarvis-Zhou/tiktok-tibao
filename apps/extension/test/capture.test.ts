@@ -67,6 +67,7 @@ test("extracts real product IDs, leaf categories, stock and opportunities from p
   assert.equal(opportunitySnapshots.products.length, 0);
   assert.equal(opportunitySnapshots.opportunities[0]?.id, "7345678901234567890");
   assert.equal(opportunitySnapshots.opportunities[0]?.active, true);
+  assert.equal(opportunitySnapshots.opportunities[0]?.requirementsVerified, true);
   assert.deepEqual(opportunitySnapshots.opportunities[0]?.categoryIds, ["601234"]);
   assert.deepEqual(opportunitySnapshots.opportunities[0]?.brandNames, ["Casa MX"]);
   assert.deepEqual(opportunitySnapshots.opportunities[0]?.allowedProductStatuses, ["LIVE"]);

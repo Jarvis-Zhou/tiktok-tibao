@@ -14,6 +14,7 @@ const capturedOpportunities = new Map<string, CollectedOpportunity>();
 function snapshotQuality(value: object): number {
   return Object.values(value).reduce((score, item) => {
     if (Array.isArray(item)) return score + Math.min(item.length, 5);
+    if (typeof item === "boolean") return score + Number(item);
     return score + (item === null || item === "" ? 0 : 1);
   }, 0);
 }

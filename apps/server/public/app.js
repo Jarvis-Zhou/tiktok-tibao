@@ -131,10 +131,10 @@ async function loadBatches() {
 
 function taskActions(task) {
   const actions = [];
-  if (["failed", "rejected", "paused"].includes(task.status)) {
+  if (["failed", "paused"].includes(task.status)) {
     actions.push(`<button class="ghost small" data-retry="${task.id}">重试</button>`);
   }
-  if (["ready", "failed", "rejected", "paused"].includes(task.status)) {
+  if (["ready", "failed", "paused"].includes(task.status)) {
     const target = task.channel === "api" ? "extension" : "api";
     actions.push(`<button class="ghost small" data-channel="${task.id}" data-target="${target}">切到 ${target}</button>`);
   }
@@ -234,10 +234,10 @@ function renderMatchResults(result) {
   }
   $("#match-results").hidden = false;
   const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
-  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，硬过滤 ${result.blockedPairCount} 个。`;
+  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，安全拦截 ${result.blockedPairCount} 个。`;
   $("#match-rows").innerHTML = state.matches.length
     ? state.matches.map((match, index) => `<tr><td><input type="checkbox" data-match-index="${index}" aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${match.recommended ? '<span class="recommendation">推荐候选</span>' : ""}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td><div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`).join("")
-    : '<tr><td colspan="5" class="empty">没有通过硬条件过滤的机会，请检查商品类目、品牌和状态。</td></tr>';
+    : '<tr><td colspan="5" class="empty">没有通过安全复核的机会，请检查完整提报规则、类目、品牌、状态、关键词和价格。</td></tr>';
   const warnings = result.warnings || [];
   $("#match-warnings").hidden = warnings.length === 0;
   $("#match-warnings").innerHTML = warnings.map((warning) => `<div>• ${escapeHtml(warning)}</div>`).join("");

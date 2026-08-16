@@ -17,6 +17,7 @@ export interface OpportunitySnapshot {
   id: string;
   title: string;
   type: string;
+  requirementsVerified: boolean;
   status: string | null;
   active: boolean | null;
   expired: boolean;
@@ -46,6 +47,8 @@ export interface ProductOpportunityMatch {
 export interface MatchScoreOptions {
   priorSubmitted?: boolean;
 }
+
+export const MIN_SAFE_MATCH_SCORE = 75;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -231,6 +234,27 @@ function collectKeywords(value: unknown): string[] {
 function collectAttributes(value: unknown): string[] {
   return unique(
     collectContextStrings(value, /(attribute|property)/, /(^value$|value_name|^name$|_name$)/),
+  );
+}
+
+function hasRequirementEvidence(value: unknown, depth = 0): boolean {
+  if (depth > 6 || value === null || value === undefined) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => hasRequirementEvidence(item, depth + 1));
+  }
+  const record = asRecord(value);
+  if (!record) return false;
+  for (const [key, child] of Object.entries(record)) {
+    if (
+      /(criteri|requirement|eligibility|restriction|listing_?rule|submission_?rule)/i.test(key) &&
+      child !== null &&
+      typeof child === "object"
+    ) {
+      return true;
+    }
+  }
+  return Object.values(record).some(
+    (child) => child !== null && typeof child === "object" && hasRequirementEvidence(child, depth + 1),
   );
 }
 
@@ -447,6 +471,7 @@ export function normalizeOpportunity(
         "recommendation_type",
         "recommendationType",
       ]) ?? "",
+    requirementsVerified: hasRequirementEvidence(opportunity),
     status,
     active,
     expired,
@@ -520,15 +545,27 @@ function hasIntersection(left: string[], right: string[]): boolean {
 
 function isExplicitlyInactive(status: string | null): boolean {
   if (!status) return false;
-  return /^(INACTIVE|DEACTIVATED|DRAFT|SUSPENDED|FROZEN|DELETED|FAILED|REJECTED)$/i.test(status.trim());
+  return /^(INACTIVE|DEACTIVATE|DEACTIVATED|DRAFT|SUSPEND|SUSPENDED|FROZEN|FREEZE|DELETED|FAILED|REJECTED|OFFLINE)$/i.test(
+    status.trim(),
+  );
+}
+
+function isKnownActiveProductStatus(status: string): boolean {
+  return /^(ACTIVATE|ACTIVATED|ACTIVE|LIVE|ONLINE|PUBLISHED|FOR[_ -]?SALE|SELLING|EN[_ -]?VIVO|ACTIVO|已上架)$/i.test(
+    status.trim(),
+  );
 }
 
 function pricePoints(product: ProductSnapshot, opportunity: OpportunitySnapshot): number {
-  if (product.price === null) return opportunity.referencePrice === null ? 5 : 0;
+  if (product.price === null) {
+    return opportunity.referencePrice === null && opportunity.minPrice === null && opportunity.maxPrice === null
+      ? 5
+      : 0;
+  }
   if (opportunity.minPrice !== null || opportunity.maxPrice !== null) {
     const aboveMin = opportunity.minPrice === null || product.price >= opportunity.minPrice;
     const belowMax = opportunity.maxPrice === null || product.price <= opportunity.maxPrice;
-    return aboveMin && belowMax ? 10 : 2;
+    return aboveMin && belowMax ? 10 : 0;
   }
   if (opportunity.referencePrice === null || opportunity.referencePrice <= 0) return 5;
   const difference = Math.abs(product.price - opportunity.referencePrice) / opportunity.referencePrice;
@@ -544,15 +581,25 @@ export function scoreOpportunityMatch(
   options: MatchScoreOptions = {},
 ): ProductOpportunityMatch {
   const blockers: string[] = [];
+  if (!opportunity.requirementsVerified) {
+    blockers.push("机会完整提报要求未获取，禁止自动提报");
+  }
+  if (!opportunity.type.trim()) blockers.push("机会类型未知，无法验证提报要求");
   if (opportunity.expired) blockers.push("机会已过期");
   if (opportunity.active === false) blockers.push("机会未激活");
+  if (opportunity.active === null) blockers.push("机会状态未知，无法确认仍可提报");
   if (opportunity.fulfilled) blockers.push("机会已完成");
   if (isExplicitlyInactive(product.status)) blockers.push(`商品状态不可提报：${product.status}`);
   if (options.priorSubmitted) blockers.push("该商品已提报过此机会");
 
   const productStatus = product.status ? comparable(product.status) : "";
+  const allowedStatuses = opportunity.allowedProductStatuses.map(comparable);
+  if (!productStatus) {
+    blockers.push("商品状态未知，无法确认可提报");
+  } else if (!isKnownActiveProductStatus(product.status ?? "") && !allowedStatuses.includes(productStatus)) {
+    blockers.push(`商品状态无法确认可提报：${product.status}`);
+  }
   if (opportunity.allowedProductStatuses.length > 0) {
-    const allowedStatuses = opportunity.allowedProductStatuses.map(comparable);
     if (!productStatus || !allowedStatuses.includes(productStatus)) {
       blockers.push(
         productStatus
@@ -564,12 +611,23 @@ export function scoreOpportunityMatch(
 
   const categoryIdMatch = hasIntersection(product.categoryIds, opportunity.categoryIds);
   const categoryNameMatch = hasIntersection(product.categoryNames, opportunity.categoryNames);
-  if (
-    product.categoryIds.length > 0 &&
-    opportunity.categoryIds.length > 0 &&
-    !categoryIdMatch
-  ) {
-    blockers.push("商品类目与机会类目不匹配");
+  const productHasCategory = product.categoryIds.length > 0 || product.categoryNames.length > 0;
+  const opportunityHasCategory =
+    opportunity.categoryIds.length > 0 || opportunity.categoryNames.length > 0;
+  if (!productHasCategory) {
+    blockers.push("商品类目未获取，无法验证机会要求");
+  }
+  if (!opportunityHasCategory) {
+    blockers.push("机会适用类目未获取，无法验证提报要求");
+  }
+  if (productHasCategory && opportunityHasCategory) {
+    if (product.categoryIds.length > 0 && opportunity.categoryIds.length > 0) {
+      if (!categoryIdMatch) blockers.push("商品类目与机会类目不匹配");
+    } else if (product.categoryNames.length > 0 && opportunity.categoryNames.length > 0) {
+      if (!categoryNameMatch) blockers.push("商品类目与机会类目不匹配");
+    } else {
+      blockers.push("商品与机会类目格式不同，无法可靠交叉验证");
+    }
   }
 
   const productBrand = product.brandName ? comparable(product.brandName) : "";
@@ -580,25 +638,32 @@ export function scoreOpportunityMatch(
     blockers.push(productBrand ? "商品品牌与机会品牌要求不匹配" : "商品缺少机会要求的品牌信息");
   }
 
-  const reasons: string[] = [];
-  let score = 0;
-  if (categoryIdMatch) {
-    score += 40;
-    reasons.push("类目 ID 精确匹配 +40");
-  } else if (categoryNameMatch) {
-    score += 32;
-    reasons.push("类目名称匹配 +32");
-  } else if (opportunity.categoryIds.length === 0 && opportunity.categoryNames.length === 0) {
-    score += 20;
-    reasons.push("机会未限定类目 +20");
+  const hasPriceRange = opportunity.minPrice !== null || opportunity.maxPrice !== null;
+  if (
+    opportunity.minPrice !== null &&
+    opportunity.maxPrice !== null &&
+    opportunity.minPrice > opportunity.maxPrice
+  ) {
+    blockers.push("机会价格要求异常，最低价高于最高价");
   }
-
-  if (opportunity.brandNames.length > 0 && brandMatch) {
-    score += 20;
-    reasons.push("品牌要求匹配 +20");
-  } else if (opportunity.brandNames.length === 0) {
-    score += 12;
-    reasons.push("机会未限定品牌 +12");
+  if (hasPriceRange) {
+    if (product.price === null) {
+      blockers.push("商品价格未获取，无法验证机会价格要求");
+    } else if (
+      (opportunity.minPrice !== null && product.price < opportunity.minPrice) ||
+      (opportunity.maxPrice !== null && product.price > opportunity.maxPrice)
+    ) {
+      blockers.push("商品价格不符合机会价格区间");
+    }
+    if (opportunity.currency && !product.currency) {
+      blockers.push("商品币种未获取，无法验证机会价格要求");
+    } else if (
+      opportunity.currency &&
+      product.currency &&
+      comparable(opportunity.currency) !== comparable(product.currency)
+    ) {
+      blockers.push("商品币种与机会价格要求不匹配");
+    }
   }
 
   const productTokens = tokens([
@@ -613,6 +678,32 @@ export function scoreOpportunityMatch(
     ...opportunity.categoryNames,
   ]);
   const matchingTokens = [...opportunityTokens].filter((token) => productTokens.has(token));
+  if (/\b(keyword|search)\b/.test(comparable(opportunity.type))) {
+    const requiredKeywordTokens = tokens(opportunity.keywords);
+    if (requiredKeywordTokens.size === 0) {
+      blockers.push("关键词机会的关键词要求未获取");
+    } else if (![...requiredKeywordTokens].some((token) => productTokens.has(token))) {
+      blockers.push("商品标题/属性未命中机会关键词要求");
+    }
+  }
+
+  const reasons: string[] = [];
+  let score = 0;
+  if (categoryIdMatch) {
+    score += 40;
+    reasons.push("类目 ID 精确匹配 +40");
+  } else if (categoryNameMatch) {
+    score += 32;
+    reasons.push("类目名称匹配 +32");
+  }
+
+  if (opportunity.brandNames.length > 0 && brandMatch) {
+    score += 20;
+    reasons.push("品牌要求匹配 +20");
+  } else if (opportunity.brandNames.length === 0 && opportunity.requirementsVerified) {
+    score += 10;
+    reasons.push("完整要求未声明品牌限制 +10");
+  }
   const textScore =
     opportunityTokens.size === 0
       ? 10
@@ -628,21 +719,25 @@ export function scoreOpportunityMatch(
   score += priceScore;
   reasons.push(`价格带匹配 +${priceScore}`);
 
-  if (!opportunity.expired && opportunity.active !== false && !opportunity.fulfilled) {
+  if (!opportunity.expired && opportunity.active === true && !opportunity.fulfilled) {
     score += 5;
     reasons.push("机会当前有效 +5");
   }
 
   score = Math.max(0, Math.min(100, score));
+  if (blockers.length === 0 && score < MIN_SAFE_MATCH_SCORE) {
+    blockers.push(`综合匹配分低于安全阈值：${score}/${MIN_SAFE_MATCH_SCORE}`);
+  }
   const eligible = blockers.length === 0;
-  const confidence: MatchConfidence = eligible && score >= 75 ? "high" : eligible && score >= 60 ? "medium" : "low";
+  const confidence: MatchConfidence =
+    eligible && score >= MIN_SAFE_MATCH_SCORE ? "high" : eligible && score >= 60 ? "medium" : "low";
   return {
     product,
     opportunity,
     score,
     confidence,
     eligible,
-    recommended: eligible && score >= 75,
+    recommended: eligible && score >= MIN_SAFE_MATCH_SCORE,
     reasons,
     blockers: unique(blockers),
   };

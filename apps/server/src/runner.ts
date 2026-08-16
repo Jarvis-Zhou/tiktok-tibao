@@ -2,6 +2,7 @@ import type {
   OpportunitySnapshot,
   ProductOpportunityMatch,
   ProductSnapshot,
+  TaskChannel,
   TaskRecord,
   TaskStatus,
 } from "@tibao/core";
@@ -55,6 +56,7 @@ function mergeOpportunity(
     id: detail.id || summary.id,
     title: detail.title && detail.title !== detail.id ? detail.title : summary.title,
     type: detail.type || summary.type,
+    requirementsVerified: detail.requirementsVerified,
     status: detail.status ?? summary.status,
     active: detail.active ?? summary.active,
     expired: detail.expired || summary.expired,
@@ -87,6 +89,26 @@ export interface ProductMatchResult {
   candidatePairCount: number;
   blockedPairCount: number;
   warnings: string[];
+}
+
+export interface MatchSelectionInput {
+  productId: string;
+  opportunityId: string;
+  channel: TaskChannel;
+}
+
+export interface MatchSelectionValidation {
+  safe: boolean;
+  issues: Array<MatchSelectionInput & { message: string }>;
+}
+
+export interface CapturedTaskValidation {
+  safe: boolean;
+  message: string;
+}
+
+function matchPairKey(productId: string, opportunityId: string): string {
+  return `${productId.trim().toLowerCase()}\u001f${opportunityId.trim().toLowerCase()}`;
 }
 
 export class ApiRunner {
@@ -229,11 +251,10 @@ export class ApiRunner {
         );
       } catch {
         detailFailures += 1;
-        details.set(opportunityId, summary);
       }
     }
     if (detailFailures > 0) {
-      warnings.push(`${detailFailures} 个机会详情读取失败，已使用列表摘要继续评分`);
+      warnings.push(`${detailFailures} 个机会详情读取失败，因无法验证完整提报要求已排除`);
     }
 
     const priorByProduct = new Map<string, Set<string>>();
@@ -262,9 +283,12 @@ export class ApiRunner {
       const productMatches: ProductOpportunityMatch[] = [];
       const summaries = summariesByProduct.get(product.id) ?? new Map();
       for (const opportunityId of summaries.keys()) {
-        const opportunity = details.get(opportunityId) ?? summaries.get(opportunityId);
-        if (!opportunity) continue;
         candidatePairCount += 1;
+        const opportunity = details.get(opportunityId);
+        if (!opportunity) {
+          blockedPairCount += 1;
+          continue;
+        }
         const match = scoreOpportunityMatch(product, opportunity, {
           priorSubmitted: priorByProduct.get(product.id)?.has(opportunityId) ?? false,
         });
@@ -283,6 +307,87 @@ export class ApiRunner {
       blockedPairCount,
       warnings,
     };
+  }
+
+  async validateMatchSelections(
+    shopId: string,
+    selections: MatchSelectionInput[],
+  ): Promise<MatchSelectionValidation> {
+    const issues: MatchSelectionValidation["issues"] = [];
+    for (const channel of ["api", "extension"] as const) {
+      const channelSelections = selections.filter((selection) => selection.channel === channel);
+      if (channelSelections.length === 0) continue;
+      const productIds = [...new Set(channelSelections.map((selection) => selection.productId))];
+      if (productIds.length > 20) {
+        issues.push(
+          ...channelSelections.map((selection) => ({
+            ...selection,
+            message: "安全复核单次最多支持 20 个商品",
+          })),
+        );
+        continue;
+      }
+
+      let result: ProductMatchResult;
+      try {
+        result = channel === "api"
+          ? await this.matchProducts(shopId, productIds)
+          : this.matchCapturedProducts(shopId, productIds);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "匹配结果安全复核失败";
+        issues.push(...channelSelections.map((selection) => ({ ...selection, message })));
+        continue;
+      }
+
+      const safePairs = new Set(
+        result.matches
+          .filter((match) => match.eligible && match.recommended && match.confidence === "high")
+          .map((match) => matchPairKey(match.product.id, match.opportunity.id)),
+      );
+      for (const selection of channelSelections) {
+        if (safePairs.has(matchPairKey(selection.productId, selection.opportunityId))) continue;
+        issues.push({
+          ...selection,
+          message: "该商品—机会组合未通过最新完整规则、高置信度或重复提报检查",
+        });
+      }
+    }
+    return { safe: issues.length === 0, issues };
+  }
+
+  validateCapturedTask(
+    task: Pick<TaskRecord, "shopId" | "productId" | "opportunityId">,
+  ): CapturedTaskValidation {
+    const product = this.database.getCapturedProducts(task.shopId, [task.productId])[0];
+    const opportunity = this.database.getCapturedOpportunity(task.shopId, task.opportunityId);
+    if (!product || !opportunity) {
+      return {
+        safe: false,
+        message: "缺少该商品或机会的插件快照，请重新采集后再匹配",
+      };
+    }
+    const oldestAllowed = Date.now() - 24 * 60 * 60 * 1_000;
+    const productCapturedAt = Date.parse(product.capturedAt);
+    const opportunityCapturedAt = Date.parse(opportunity.capturedAt);
+    if (
+      !Number.isFinite(productCapturedAt) ||
+      !Number.isFinite(opportunityCapturedAt) ||
+      productCapturedAt < oldestAllowed ||
+      opportunityCapturedAt < oldestAllowed
+    ) {
+      return {
+        safe: false,
+        message: "商品或机会快照已超过 24 小时，请刷新 Seller Center 并重新采集匹配",
+      };
+    }
+    const match = scoreOpportunityMatch(product, opportunity);
+    if (!match.eligible || !match.recommended || match.confidence !== "high") {
+      return {
+        safe: false,
+        message: `插件执行前安全复核未通过：${match.blockers.join("；") || `匹配分 ${match.score}`}`,
+      };
+    }
+    return { safe: true, message: "安全复核通过" };
   }
 
   matchCapturedProducts(shopId: string, productIds: string[]): ProductMatchResult {
@@ -304,6 +409,7 @@ export class ApiRunner {
 
     const warnings = [
       "匹配基于 Chrome 插件采集到本地的 Seller Center 快照；刷新页面并重新导入可更新数据。",
+      "仅包含可验证提报规则且达到高置信度的组合会进入候选；旧版或缺规则快照会被排除。",
       "未调用官方 API，因此平台侧历史提报记录无法查询；已使用本地任务台账排除重复组合。",
     ];
     if (missingProductIds.length > 0) {
@@ -365,8 +471,36 @@ export class ApiRunner {
   }
 
   private async executeTask(task: TaskRecord): Promise<void> {
+    let client: TikTokShopClient;
     try {
-      const client = this.clientForShopId(task.shopId);
+      client = this.clientForShopId(task.shopId);
+      const productResponse = await this.readRequest(() => client.getProduct(task.productId));
+      const opportunityResponse = await this.readRequest(() =>
+        client.getOpportunity(task.opportunityId),
+      );
+      const product = normalizeProduct(productResponse.data, task.productId);
+      const opportunity = normalizeOpportunity(opportunityResponse.data, task.opportunityId);
+      const match = scoreOpportunityMatch(product, opportunity);
+      if (!match.eligible || !match.recommended || match.confidence !== "high") {
+        this.database.completeTask(task.id, {
+          status: "paused",
+          errorCode: "LOCAL_ELIGIBILITY_CHECK_FAILED",
+          errorMessage: `提报前安全复核未通过：${match.blockers.join("；") || `匹配分 ${match.score}`}`,
+        });
+        return;
+      }
+    } catch (error) {
+      this.database.completeTask(task.id, {
+        status: "paused",
+        errorCode: "LOCAL_ELIGIBILITY_CHECK_UNAVAILABLE",
+        errorMessage: `提报前无法完成商品与机会要求复核，未调用提报接口：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+      return;
+    }
+
+    try {
       const response = await client.submitProduct(task.opportunityId, task.productId);
       const submissionId = stringField(response.data.submission, ["id"]);
       const responseStatus = normalizeReviewStatus(response.data.submission.status);

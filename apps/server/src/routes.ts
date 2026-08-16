@@ -176,6 +176,13 @@ function parseCapturedOpportunity(value: unknown, index: number): CapturedOpport
   if (raw.active !== null && raw.active !== undefined && typeof raw.active !== "boolean") {
     throw new SnapshotValidationError(`${prefix} active 无效`);
   }
+  if (
+    raw.requirementsVerified !== null &&
+    raw.requirementsVerified !== undefined &&
+    typeof raw.requirementsVerified !== "boolean"
+  ) {
+    throw new SnapshotValidationError(`${prefix} requirementsVerified 无效`);
+  }
   for (const key of ["expired", "fulfilled"] as const) {
     if (raw[key] !== undefined && typeof raw[key] !== "boolean") {
       throw new SnapshotValidationError(`${prefix} ${key} 无效`);
@@ -185,6 +192,7 @@ function parseCapturedOpportunity(value: unknown, index: number): CapturedOpport
     id,
     title,
     type,
+    requirementsVerified: raw.requirementsVerified === true,
     status: status || null,
     active: typeof raw.active === "boolean" ? raw.active : null,
     expired: raw.expired === true,
@@ -551,6 +559,20 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
         invalid: validation.invalid.map((row) => ({ sourceRow: row.sourceRow, issues: row.issues })),
       });
     }
+    const safetyValidation = await runner.validateMatchSelections(
+      shopId,
+      validation.valid.map((row) => ({
+        productId: row.input.productId,
+        opportunityId: row.input.opportunityId,
+        channel: row.input.channel,
+      })),
+    );
+    if (!safetyValidation.safe) {
+      return reply.code(409).send({
+        error: "所选组合未通过最新安全复核，未创建批次；请重新读取商品和机会后匹配",
+        invalid: safetyValidation.issues,
+      });
+    }
     const timestamp = new Date().toISOString();
     const batch = database.createBatch({
       filename: `opportunity-matches-${timestamp.slice(0, 19).replaceAll(":", "-")}.json`,
@@ -667,6 +689,12 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
   });
 
   app.post<{ Params: { id: string } }>("/api/tasks/:id/retry", async (request, reply) => {
+    const current = database.getTask(request.params.id);
+    if (current?.status === "rejected") {
+      return reply.code(409).send({
+        error: "审核拒绝任务禁止直接重试；请先刷新商品与机会规则并重新匹配，避免重复拒绝",
+      });
+    }
     const task = database.requeueTask(request.params.id);
     if (!task) return reply.code(404).send({ error: "任务不存在" });
     return { task };
@@ -679,6 +707,12 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     const channel = request.body?.channel as TaskChannel | undefined;
     if (!channel || !(TASK_CHANNELS as readonly string[]).includes(channel)) {
       return reply.code(400).send({ error: "channel 仅支持 api 或 extension" });
+    }
+    const current = database.getTask(request.params.id);
+    if (current?.status === "rejected") {
+      return reply.code(409).send({
+        error: "审核拒绝任务禁止直接切换通道重试；请先重新采集并匹配",
+      });
     }
     const task = database.setTaskChannel(request.params.id, channel);
     if (!task) return reply.code(404).send({ error: "任务不存在或当前状态不允许切换通道" });
@@ -881,14 +915,25 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     Querystring: { shopId?: string };
   }>("/api/extension/tasks/next", async (request, reply) => {
     if (!verifyExtension(request, reply, config)) return;
-    const task = database.claimNextTask(
-      "extension",
-      config.taskLeaseMinutes,
-      undefined,
-      request.query.shopId,
-    );
-    if (!task) return reply.code(204).send();
-    return { task };
+    for (let checked = 0; checked < 100; checked += 1) {
+      const task = database.claimNextTask(
+        "extension",
+        config.taskLeaseMinutes,
+        undefined,
+        request.query.shopId,
+      );
+      if (!task) return reply.code(204).send();
+      const validation = runner.validateCapturedTask(task);
+      if (validation.safe) return { task };
+      database.completeTask(task.id, {
+        status: "paused",
+        errorCode: "LOCAL_ELIGIBILITY_CHECK_FAILED",
+        errorMessage: validation.message,
+      });
+    }
+    return reply.code(409).send({
+      error: "连续 100 条插件任务未通过安全复核，已暂停；请重新采集并匹配后再领取",
+    });
   });
 
   app.post<{
@@ -907,6 +952,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     }
     const status = request.body?.status;
     if (status === "ready") {
+      if (current.status === "rejected") {
+        return reply.code(409).send({
+          error: "审核拒绝任务禁止直接放回队列；请重新采集并匹配",
+        });
+      }
       return { task: database.requeueTask(current.id, request.body) };
     }
     if (status !== "submitted" && status !== "failed") {
