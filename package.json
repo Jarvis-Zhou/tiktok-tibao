@@ -1,0 +1,29 @@
+{
+  "name": "tibao",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @tibao/server",
+    "dev:server": "npm run dev --workspace @tibao/server",
+    "build": "npm run build --workspaces --if-present",
+    "build:extension": "npm run build --workspace @tibao/extension",
+    "package:extension": "npm run package --workspace @tibao/extension",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

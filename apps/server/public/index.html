@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tibao · TikTok Shop MX 商品机会提报</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">TIKTOK SHOP MX · MVP</p>
+        <h1>商品机会批量提报台</h1>
+      </div>
+      <div id="health" class="health">正在检查配置…</div>
+    </header>
+
+    <main>
+      <section class="hero panel">
+        <div>
+          <span class="badge">A + C 双通道</span>
+          <h2>先选商品，再找机会，确认后批量提报</h2>
+          <p>工具读取商品与机会规则，在本地完成硬过滤和可解释评分；只有你勾选确认的组合才会进入 A / C 提报队列。</p>
+        </div>
+        <div class="flow" aria-label="工作流程">
+          <span>选品</span><b>→</b><span>机会匹配</span><b>→</b><span>人工确认</span><b>→</b><span>API / 插件</span><b>→</b><span>结果台账</span>
+        </div>
+      </section>
+
+      <section class="panel shop-panel">
+        <div class="shop-layout">
+          <div>
+          <div class="section-title">
+            <div><p class="step">01</p><h2>连接墨西哥店铺</h2></div>
+          </div>
+          <form id="shop-form" class="stack">
+            <label>店铺名称<input name="name" required placeholder="例如：MX 主店" /></label>
+            <label>Shop Cipher（仅 API 通道需要）<input name="shopCipher" autocomplete="off" /></label>
+            <label>Access Token（仅 API 通道需要）<input name="accessToken" type="password" autocomplete="off" /></label>
+            <button class="primary" type="submit">保存店铺</button>
+          </form>
+          <p class="hint">只用 Chrome 插件时仅填写店铺名称；使用 API 时，Shop Cipher 与 Token 必须同时填写，Token 会在本机加密保存。</p>
+          </div>
+          <div id="shops" class="shop-list"></div>
+        </div>
+      </section>
+
+      <section class="panel match-panel">
+        <div class="section-title">
+          <div><p class="step">02</p><h2>选择商品并匹配机会</h2></div>
+          <span class="badge">最多 20 个商品 / 次</span>
+        </div>
+        <div class="match-controls">
+          <label>店铺<select id="match-shop-select"><option value="">请先添加店铺</option></select></label>
+          <label>本页筛选<input id="product-filter" type="search" placeholder="商品名或 Product ID" /></label>
+          <button class="primary align-end" id="load-products" type="button">读取店铺商品</button>
+          <button class="ghost align-end" id="load-more-products" type="button" hidden>加载更多</button>
+        </div>
+        <label class="manual-product-label">直接填写 Product ID（可选，每行或逗号分隔）
+          <textarea id="manual-product-ids" rows="3" placeholder="无法从列表找到时，可在这里粘贴 Product ID"></textarea>
+        </label>
+        <div class="table-wrap compact-table">
+          <table class="product-table">
+            <thead><tr><th><input id="product-select-all" type="checkbox" aria-label="选择本页全部商品" /></th><th>商品</th><th>类目 / 品牌</th><th>状态</th><th>价格</th></tr></thead>
+            <tbody id="product-rows"><tr><td colspan="5" class="empty">点击“读取店铺商品”，或直接填写 Product ID</td></tr></tbody>
+          </table>
+        </div>
+        <div class="match-action-row">
+          <p id="product-selection-summary" class="hint">尚未选择商品。</p>
+          <button class="primary" id="match-products" type="button">获取并匹配机会</button>
+        </div>
+        <div id="match-progress" class="match-progress" hidden></div>
+        <div id="match-results" hidden>
+          <div class="match-result-head">
+            <div>
+              <h3>匹配结果</h3>
+              <p id="match-summary" class="hint"></p>
+            </div>
+            <p class="hint">高置信度仅作推荐，系统不会自动勾选；请逐条确认。</p>
+          </div>
+          <div class="table-wrap">
+            <table class="match-table">
+              <thead><tr><th>选择</th><th>商品</th><th>匹配机会</th><th>得分</th><th>匹配依据</th></tr></thead>
+              <tbody id="match-rows"></tbody>
+            </table>
+          </div>
+          <div id="match-warnings" class="warning-list" hidden></div>
+          <div class="result-controls">
+            <label>执行通道
+              <select id="match-channel">
+                <option value="api">A · 官方 API</option>
+                <option value="extension">C · Chrome 插件</option>
+              </select>
+            </label>
+            <label class="inline-check"><input id="run-matched-api" type="checkbox" /> 创建后立即启动 A 通道</label>
+            <button class="primary" id="create-match-batch" type="button">确认选择并创建提报批次</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+          <div class="section-title">
+            <div><p class="step">03 · 备用入口</p><h2>导入已匹配任务</h2></div>
+            <a href="/api/import-template.csv">下载模板</a>
+          </div>
+          <form id="import-form" class="stack">
+            <label>默认店铺<select name="shopId" id="shop-select" required><option value="">请先添加店铺</option></select></label>
+            <label>默认执行通道
+              <select name="channel">
+                <option value="api">A · 官方 API</option>
+                <option value="extension">C · Chrome 插件</option>
+              </select>
+            </label>
+            <label class="file-field">Excel / CSV<input name="file" type="file" accept=".xlsx,.xls,.csv" required /></label>
+            <button class="primary" type="submit">校验并创建批次</button>
+          </form>
+          <p class="hint">支持中英文表头。商品 ID 建议在 Excel 中设为文本，避免超长数字被科学计数法改写。</p>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <div><p class="step">04</p><h2>批次</h2></div>
+          <button class="ghost" id="refresh">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>文件 / 时间</th><th>有效</th><th>无效</th><th>状态分布</th><th>操作</th></tr></thead>
+            <tbody id="batch-rows"><tr><td colspan="5" class="empty">暂无批次</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-title task-title">
+          <div><p class="step">05</p><h2>任务台账</h2></div>
+          <div class="toolbar">
+            <select id="batch-filter"><option value="">全部批次</option></select>
+            <select id="status-filter"><option value="">全部状态</option></select>
+            <a id="export-link" class="button-link" href="/api/tasks/export.csv">导出 CSV</a>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>商品 / 机会</th><th>通道</th><th>状态</th><th>尝试</th><th>结果 / 错误</th><th>操作</th></tr></thead>
+            <tbody id="task-rows"><tr><td colspan="6" class="empty">暂无任务</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel extension-note">
+        <div><p class="step">C 通道</p><h2>Chrome 插件采用人工确认模式</h2></div>
+        <p>插件领取任务后负责打开/填写页面，默认不自动点击最终提交。首次使用先在插件设置页填写本机服务地址、共享密钥和实际页面选择器。</p>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

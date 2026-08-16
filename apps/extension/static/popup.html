@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8" /><link rel="stylesheet" href="styles.css" /></head>
+  <body class="popup">
+    <header><div><span>TIBAO · C 通道</span><h1>页面执行器</h1></div><a href="options.html" target="_blank">设置</a></header>
+    <p id="status" class="message">正在连接…</p>
+    <section class="capture-panel">
+      <div class="section-heading"><strong>当前页商品采集</strong><span id="capture-count">0 个</span></div>
+      <div id="capture-preview"><p class="empty">请先打开 Seller Center 商品列表页</p></div>
+      <div class="grid">
+        <button id="collect-products">读取当前页</button>
+        <button id="import-products" class="primary" disabled>导入本地服务</button>
+      </div>
+    </section>
+    <p class="section-label">商品机会提报任务</p>
+    <section id="task"><p class="empty">没有正在处理的任务</p></section>
+    <button id="claim" class="primary">领取下一条插件任务</button>
+    <div class="grid">
+      <button id="open-page" disabled>打开机会页</button>
+      <button id="fill" disabled>填写商品 ID</button>
+    </div>
+    <label class="check"><input id="auto-submit" type="checkbox" /> 本次允许自动点击提交</label>
+    <div class="grid three">
+      <button id="success" disabled>确认成功</button>
+      <button id="fail" disabled>记录失败</button>
+      <button id="requeue" disabled>放回队列</button>
+    </div>
+    <p class="footnote">默认只填写、不提交。只有勾选本次授权且配置成功标识后，才会自动点击。</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

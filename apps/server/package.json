@@ -1,0 +1,25 @@
+{
+  "name": "@tibao/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "npm run build --workspace @tibao/core && npm run build --workspace @tibao/tiktok-api",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build --workspace @tibao/core && npm run build --workspace @tibao/tiktok-api",
+    "test": "tsx --test test/**/*.test.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/multipart": "^9.0.0",
+    "@fastify/static": "^8.0.0",
+    "@tibao/core": "*",
+    "@tibao/tiktok-api": "*",
+    "dotenv": "^16.5.0",
+    "fastify": "^5.3.0",
+    "xlsx": "^0.18.5"
+  }
+}

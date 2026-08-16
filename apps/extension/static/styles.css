@@ -1,0 +1,39 @@
+:root { font-family: Inter, "PingFang SC", sans-serif; color: #142029; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f4f7f8; }
+.popup { width: 380px; padding: 16px; }
+header { display: flex; align-items: start; justify-content: space-between; margin-bottom: 12px; }
+header span, .eyebrow { color: #00736d; font-weight: 800; letter-spacing: .12em; font-size: 10px; }
+h1 { margin: 4px 0 0; font-size: 21px; }
+h2 { margin: 12px 0 0; font-size: 16px; color: #263740; }
+a { color: #00736d; }
+section, .message { background: white; border: 1px solid #dce4e7; border-radius: 9px; padding: 11px; margin: 9px 0; }
+.message { color: #52616b; font-size: 12px; }
+.message.error { border-color: #ecb8bb; color: #9b3035; background: #fff1f2; }
+.message.success { border-color: #9bd7c5; color: #146444; background: #ecfaf5; }
+.empty { color: #73808a; text-align: center; font-size: 12px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.section-heading span { color: #00736d; font-weight: 750; }
+.section-label { margin: 14px 0 4px; color: #65747d; font-size: 11px; font-weight: 750; letter-spacing: .08em; }
+.capture-list { display: grid; gap: 7px; margin-top: 10px; }
+.capture-list > div { min-width: 0; padding-top: 7px; border-top: 1px solid #edf1f2; }
+.capture-list strong, .capture-list code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-list strong { font-size: 12px; }
+.capture-list code { margin-top: 2px; color: #73808a; font-size: 10px; }
+.more { margin: 8px 0 0; color: #73808a; font-size: 11px; }
+dl { margin: 0; display: grid; grid-template-columns: 110px 1fr; gap: 7px; font-size: 12px; }
+dt { color: #73808a; } dd { margin: 0; word-break: break-all; font-weight: 650; }
+button { border: 1px solid #ccd6da; border-radius: 8px; background: white; padding: 9px 10px; cursor: pointer; font: inherit; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { width: 100%; border-color: #00736d; background: #00736d; color: white; font-weight: 750; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.grid.three { grid-template-columns: repeat(3, 1fr); }
+.check { display: flex; align-items: center; gap: 7px; margin: 11px 0; font-size: 12px; color: #6b550d; }
+.check input { width: auto; }
+.footnote { color: #73808a; font-size: 11px; line-height: 1.5; margin-bottom: 0; }
+.options main { width: min(720px, calc(100% - 32px)); margin: 40px auto; padding: 28px; background: white; border: 1px solid #dce4e7; border-radius: 14px; }
+.options main > p { color: #65747d; line-height: 1.6; }
+form { display: grid; gap: 14px; margin-top: 22px; }
+.form-hint { margin: -4px 0 0; color: #65747d; font-size: 12px; line-height: 1.5; }
+label { display: grid; gap: 6px; color: #53626c; font-size: 13px; font-weight: 650; }
+input { width: 100%; border: 1px solid #cbd6da; border-radius: 8px; padding: 10px; font: inherit; }

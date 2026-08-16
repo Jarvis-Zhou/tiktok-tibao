@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><link rel="stylesheet" href="styles.css" /><title>Tibao 插件设置</title></head>
+  <body class="options">
+    <main>
+      <span class="eyebrow">TIBAO · CHROME EXECUTOR</span>
+      <h1>插件设置</h1>
+      <p>选择器需根据真实墨西哥 Seller Center 页面确认。页面改版时只改这里，不需要重新开发任务系统。</p>
+      <form>
+        <label>本地服务地址<input name="serverUrl" placeholder="http://127.0.0.1:3210" required /></label>
+        <label>插件共享密钥<input name="extensionKey" type="password" required /></label>
+        <label>本地店铺 ID（导入商品时必填）<input name="shopId" placeholder="从 Tibao 本地管理页复制店铺 ID" /></label>
+        <h2>商品页采集选择器</h2>
+        <p class="form-hint">全部留空时使用内置通用规则；若真实页面无法识别，再按商品列表 DOM 填写。字段选择器均相对于商品行。</p>
+        <label>商品行 CSS 选择器<input name="productRowSelector" placeholder="例如：tbody tr" /></label>
+        <label>商品 ID CSS 选择器<input name="productIdSelector" placeholder="例如：[data-product-id]" /></label>
+        <label>商品标题 CSS 选择器<input name="productTitleSelector" placeholder="例如：[data-product-title]" /></label>
+        <label>商品状态 CSS 选择器<input name="productStatusSelector" placeholder="例如：[data-product-status]" /></label>
+        <label>商品类目 CSS 选择器<input name="productCategorySelector" placeholder="例如：[data-product-category]" /></label>
+        <label>商品品牌 CSS 选择器<input name="productBrandSelector" placeholder="例如：[data-product-brand]" /></label>
+        <label>商品价格 CSS 选择器<input name="productPriceSelector" placeholder="例如：[data-product-price]" /></label>
+        <label>商品库存 CSS 选择器<input name="productStockSelector" placeholder="例如：[data-product-stock]" /></label>
+        <h2>机会提报选择器</h2>
+        <label>机会页面 URL 模板<input name="opportunityUrlTemplate" placeholder="https://.../{opportunity_id}" /></label>
+        <label>商品 ID 输入框 CSS 选择器<input name="productInputSelector" placeholder="input[name='product_id']" /></label>
+        <label>提交按钮 CSS 选择器<input name="submitButtonSelector" placeholder="button[data-testid='submit']" /></label>
+        <label>成功标识 CSS 选择器<input name="successSelector" placeholder="[data-testid='submit-success']" /></label>
+        <button class="primary" type="submit">保存设置</button>
+      </form>
+      <p id="message" class="message"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
