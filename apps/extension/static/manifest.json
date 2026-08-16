@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tibao · TikTok Shop 商品机会提报",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "从 Seller Center 采集当前页商品，并从本地 Tibao 队列辅助执行商品机会提报。",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": [
@@ -9,6 +9,7 @@
     "http://localhost:3210/*",
     "https://seller-mx.tiktok.com/*",
     "https://seller.tiktokglobalshop.com/*",
+    "https://seller.tiktokshopglobalselling.com/*",
     "https://*.tiktokshop.com/*",
     "https://*.tiktokglobalshop.com/*"
   ],
@@ -24,6 +25,7 @@
         "http://localhost:3210/*",
         "https://seller-mx.tiktok.com/*",
         "https://seller.tiktokglobalshop.com/*",
+        "https://seller.tiktokshopglobalselling.com/*",
         "https://*.tiktokshop.com/*",
         "https://*.tiktokglobalshop.com/*"
       ],

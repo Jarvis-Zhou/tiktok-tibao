@@ -1,11 +1,12 @@
 {
   "name": "@tibao/extension",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "package": "npm run build && node package.mjs",
+    "test": "node --test test/manifest.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -101,7 +101,11 @@ function sendTabMessage<T>(tabId: number, message: object): Promise<T> {
     chrome.tabs.sendMessage(tabId, message, (response: T | undefined) => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
-        reject(new Error(runtimeError.message));
+        const disconnected = runtimeError.message?.includes("Receiving end does not exist")
+          || runtimeError.message?.includes("Could not establish connection");
+        reject(new Error(disconnected
+          ? "当前页面未加载 Tibao 页面脚本，请确认域名受支持并刷新当前标签页"
+          : runtimeError.message));
         return;
       }
       if (!response) {
