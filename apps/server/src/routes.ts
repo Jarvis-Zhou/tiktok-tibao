@@ -31,7 +31,7 @@ function csvCell(value: unknown): string {
   return /[",\r\n]/.test(string) ? `"${string.replaceAll('"', '""')}"` : string;
 }
 
-function isAllowedCaptureSource(value: string): boolean {
+export function isAllowedCaptureSource(value: string): boolean {
   try {
     const url = new URL(value);
     if (
@@ -45,6 +45,7 @@ function isAllowedCaptureSource(value: string): boolean {
     return (
       url.hostname === "seller-mx.tiktok.com" ||
       url.hostname === "seller.tiktokglobalshop.com" ||
+      url.hostname === "seller.tiktokshopglobalselling.com" ||
       url.hostname.endsWith(".tiktokshop.com") ||
       url.hostname.endsWith(".tiktokglobalshop.com")
     );

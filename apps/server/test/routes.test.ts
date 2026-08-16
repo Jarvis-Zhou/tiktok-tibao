@@ -6,9 +6,32 @@ import test from "node:test";
 import Fastify from "fastify";
 import type { AppConfig } from "../src/config.js";
 import { TibaoDatabase } from "../src/database.js";
-import { registerRoutes } from "../src/routes.js";
+import { isAllowedCaptureSource, registerRoutes } from "../src/routes.js";
 import type { ApiRunner } from "../src/runner.js";
 import { TokenVault } from "../src/token-vault.js";
+
+test("allows trusted Seller Center and fixture sources without accepting lookalike hosts", () => {
+  assert.equal(
+    isAllowedCaptureSource(
+      "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MY",
+    ),
+    true,
+  );
+  assert.equal(isAllowedCaptureSource("https://seller-mx.tiktok.com/products"), true);
+  assert.equal(
+    isAllowedCaptureSource("http://127.0.0.1:3210/extension-product-fixture.html"),
+    true,
+  );
+  assert.equal(
+    isAllowedCaptureSource("https://seller.tiktokshopglobalselling.com.evil.example/products"),
+    false,
+  );
+  assert.equal(
+    isAllowedCaptureSource("http://seller.tiktokshopglobalselling.com/products"),
+    false,
+  );
+  assert.equal(isAllowedCaptureSource("https://example.com/products"), false);
+});
 
 test("requires explicit confirmation before creating a matched batch", async () => {
   const directory = mkdtempSync(join(tmpdir(), "tibao-routes-test-"));
@@ -102,7 +125,7 @@ test("imports extension-captured products with shared-key authentication", async
     await registerRoutes(app, { config, database, vault, runner });
     const payload = {
       shopId: shop.id,
-      sourceUrl: "https://seller-mx.tiktok.com/products",
+      sourceUrl: "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MY",
       capturedAt: "2026-08-16T08:00:00.000Z",
       products: [
         {
