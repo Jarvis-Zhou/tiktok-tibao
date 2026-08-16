@@ -9,6 +9,8 @@ const state = {
   selectedProductIds: new Set(),
 };
 
+const MAX_PRODUCTS_PER_MATCH = 20;
+
 const $ = (selector) => document.querySelector(selector);
 
 function escapeHtml(value) {
@@ -173,17 +175,31 @@ function renderProductSelectionSummary() {
   const ids = allSelectedProductIds();
   const node = $("#product-selection-summary");
   node.textContent = ids.length
-    ? `已选择 ${ids.length} 个商品${ids.length > 20 ? "，超过单次上限 20" : ""}。`
+    ? `已选择 ${ids.length} 个商品${ids.length > MAX_PRODUCTS_PER_MATCH ? `，超过单次上限 ${MAX_PRODUCTS_PER_MATCH}` : ""}。`
     : "尚未选择商品。";
-  node.className = `hint${ids.length > 20 ? " error-text" : ""}`;
+  node.className = `hint${ids.length > MAX_PRODUCTS_PER_MATCH ? " error-text" : ""}`;
+}
+
+function productProgressState(product) {
+  return product.submissionProgress?.state === "in_submission" ? "in_submission" : "pending";
 }
 
 function visibleProducts() {
-  const filter = $("#product-filter").value.trim().toLowerCase();
-  if (!filter) return state.products;
-  return state.products.filter((product) =>
-    `${product.id} ${product.title}`.toLowerCase().includes(filter),
-  );
+  const keyword = $("#product-filter").value.trim().toLowerCase();
+  const progress = $("#product-progress-filter").value;
+  return state.products.filter((product) => {
+    const matchesKeyword = !keyword || `${product.id} ${product.title}`.toLowerCase().includes(keyword);
+    const matchesProgress = progress === "all" || productProgressState(product) === progress;
+    return matchesKeyword && matchesProgress;
+  });
+}
+
+function renderProductProgressSummary() {
+  const pending = state.products.filter((product) => productProgressState(product) === "pending").length;
+  const inSubmission = state.products.length - pending;
+  $("#product-progress-summary").textContent = state.products.length
+    ? `已加载 ${state.products.length} 个：待匹配提报 ${pending} · 已进入提报 ${inSubmission}${state.nextProductPageToken ? " · 还有下一页" : ""}`
+    : "读取商品后会根据本地提报台账显示进度。";
 }
 
 function renderProducts() {
@@ -191,16 +207,24 @@ function renderProducts() {
   $("#product-rows").innerHTML = products.length
     ? products.map((product) => {
       const category = product.categoryNames.at(-1) || product.categoryIds.at(-1) || "—";
-      return `<tr><td><input type="checkbox" data-product-id="${escapeHtml(product.id)}" ${state.selectedProductIds.has(product.id) ? "checked" : ""} aria-label="选择 ${escapeHtml(product.title)}" /></td><td><strong>${escapeHtml(product.title || product.id)}</strong><code>${escapeHtml(product.id)}</code></td><td>${escapeHtml(category)}<code>${escapeHtml(product.brandName || "无品牌信息")}</code></td><td>${escapeHtml(product.status || "未知")}</td><td>${escapeHtml(formatPrice(product))}</td></tr>`;
+      const progress = product.submissionProgress;
+      const inSubmission = productProgressState(product) === "in_submission";
+      const progressDetail = inSubmission
+        ? `${progress?.taskCount || 0} 条任务 · ${countLabel(progress?.statusCounts)}`
+        : "尚未创建提报任务";
+      return `<tr><td><input type="checkbox" data-product-id="${escapeHtml(product.id)}" ${state.selectedProductIds.has(product.id) ? "checked" : ""} aria-label="选择 ${escapeHtml(product.title)}" /></td><td><strong>${escapeHtml(product.title || product.id)}</strong><code>${escapeHtml(product.id)}</code></td><td>${escapeHtml(category)}<code>${escapeHtml(product.brandName || "无品牌信息")}</code></td><td>${escapeHtml(product.status || "未知")}</td><td>${escapeHtml(formatPrice(product))}</td><td><span class="submission-progress ${inSubmission ? "in-submission" : "pending"}">${inSubmission ? "已进入提报" : "待匹配提报"}</span><code>${escapeHtml(progressDetail)}</code></td></tr>`;
     }).join("")
-    : '<tr><td colspan="5" class="empty">当前列表没有商品；可直接填写 Product ID</td></tr>';
-  const allVisibleSelected = products.length > 0 && products.every((product) => state.selectedProductIds.has(product.id));
-  $("#product-select-all").checked = allVisibleSelected;
+    : '<tr><td colspan="6" class="empty">当前筛选下没有商品；可调整筛选或直接填写 Product ID</td></tr>';
+  const selectedVisibleCount = products.filter((product) => state.selectedProductIds.has(product.id)).length;
+  const selectAll = $("#product-select-all");
+  selectAll.checked = products.length > 0 && selectedVisibleCount === products.length;
+  selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < products.length;
   $("#load-more-products").hidden = !state.nextProductPageToken;
+  renderProductProgressSummary();
   renderProductSelectionSummary();
 }
 
-async function loadProducts(append = false) {
+async function loadProducts(append = false, { quiet = false } = {}) {
   const shopId = $("#match-shop-select").value;
   if (!shopId) throw new Error("请先选择店铺");
   const params = new URLSearchParams({
@@ -214,12 +238,57 @@ async function loadProducts(append = false) {
   state.nextProductPageToken = result.nextPageToken;
   state.productSource = result.source;
   renderProducts();
-  const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
-  toast(`已从${sourceLabel}读取 ${state.products.length} 个商品${state.nextProductPageToken ? "，还有下一页" : ""}`);
+  if (!quiet) {
+    const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
+    toast(`已从${sourceLabel}读取 ${state.products.length} 个商品${state.nextProductPageToken ? "，还有下一页" : ""}`);
+  }
+}
+
+async function selectNextPendingProducts() {
+  if (!$("#match-shop-select").value) throw new Error("请先选择店铺");
+  if (state.products.length === 0) await loadProducts(false, { quiet: true });
+
+  const seenPageTokens = new Set();
+  let pending = state.products.filter((product) => productProgressState(product) === "pending");
+  while (pending.length < MAX_PRODUCTS_PER_MATCH && state.nextProductPageToken) {
+    if (seenPageTokens.has(state.nextProductPageToken)) break;
+    seenPageTokens.add(state.nextProductPageToken);
+    await loadProducts(true, { quiet: true });
+    pending = state.products.filter((product) => productProgressState(product) === "pending");
+  }
+
+  state.selectedProductIds.clear();
+  $("#manual-product-ids").value = "";
+  $("#product-filter").value = "";
+  $("#product-progress-filter").value = "pending";
+  for (const product of pending.slice(0, MAX_PRODUCTS_PER_MATCH)) {
+    state.selectedProductIds.add(product.id);
+  }
+  renderProducts();
+  toast(
+    pending.length > 0
+      ? `已筛选并选择 ${Math.min(pending.length, MAX_PRODUCTS_PER_MATCH)} 个待匹配提报商品`
+      : "当前已加载全部商品，没有待匹配提报商品",
+  );
 }
 
 function confidenceLabel(confidence) {
   return confidence === "high" ? "高" : confidence === "medium" ? "中" : "低";
+}
+
+function isSelectableMatch(match) {
+  return match?.eligible === true && match.recommended === true && match.confidence === "high";
+}
+
+function syncMatchSelectionState() {
+  const checkboxes = [...document.querySelectorAll("[data-match-index]:not(:disabled)")];
+  const selectedCount = checkboxes.filter((input) => input.checked).length;
+  const selectAll = $("#match-select-all");
+  selectAll.disabled = checkboxes.length === 0;
+  selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+  $("#match-selection-summary").textContent = `已选 ${selectedCount} / ${checkboxes.length} 个可提报结果`;
+  $("#create-match-batch").disabled = selectedCount === 0;
 }
 
 function renderMatchResults(result) {
@@ -234,14 +303,18 @@ function renderMatchResults(result) {
   }
   $("#match-results").hidden = false;
   const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
-  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，安全拦截 ${result.blockedPairCount} 个。`;
+  const selectableCount = state.matches.filter(isSelectableMatch).length;
+  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，安全拦截 ${result.blockedPairCount} 个，剩余 ${selectableCount} 个高置信度可提报结果。`;
   $("#match-rows").innerHTML = state.matches.length
-    ? state.matches.map((match, index) => `<tr><td><input type="checkbox" data-match-index="${index}" aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${match.recommended ? '<span class="recommendation">推荐候选</span>' : ""}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td><div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`).join("")
+    ? state.matches.map((match, index) => {
+      const selectable = isSelectableMatch(match);
+      return `<tr><td><input type="checkbox" data-match-index="${index}" ${selectable ? "" : "disabled"} aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${selectable ? '<span class="recommendation">可提报</span>' : '<span class="reference-only">仅供参考</span>'}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td><div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`;
+    }).join("")
     : '<tr><td colspan="5" class="empty">没有通过安全复核的机会，请检查完整提报规则、类目、品牌、状态、关键词和价格。</td></tr>';
   const warnings = result.warnings || [];
   $("#match-warnings").hidden = warnings.length === 0;
   $("#match-warnings").innerHTML = warnings.map((warning) => `<div>• ${escapeHtml(warning)}</div>`).join("");
-  $("#create-match-batch").disabled = state.matches.length === 0;
+  syncMatchSelectionState();
 }
 
 async function matchSelectedProducts() {
@@ -249,7 +322,9 @@ async function matchSelectedProducts() {
   const productIds = allSelectedProductIds();
   if (!shopId) throw new Error("请先选择店铺");
   if (productIds.length === 0) throw new Error("至少选择或填写一个 Product ID");
-  if (productIds.length > 20) throw new Error("MVP 单次最多匹配 20 个商品");
+  if (productIds.length > MAX_PRODUCTS_PER_MATCH) {
+    throw new Error(`MVP 单次最多匹配 ${MAX_PRODUCTS_PER_MATCH} 个商品`);
+  }
   $("#match-results").hidden = true;
   $("#match-progress").hidden = false;
   $("#match-progress").textContent = `正在读取 ${productIds.length} 个商品详情、候选机会和历史提报记录，请勿重复点击…`;
@@ -287,14 +362,24 @@ async function createMatchedBatch() {
       })),
     }),
   });
-  toast(
-    result.started
-      ? `批次已创建并启动：有效 ${result.batch.validRows}，重复 ${result.batch.duplicateRows}`
-      : `批次已创建：有效 ${result.batch.validRows}，重复 ${result.batch.duplicateRows}`,
-  );
-  await Promise.all([loadBatches(), loadTasks()]);
+  state.products = state.products.map((product) => {
+    const submissionProgress = result.productProgress?.[product.id];
+    return submissionProgress ? { ...product, submissionProgress } : product;
+  });
+  state.selectedProductIds.clear();
+  state.matches = [];
+  $("#manual-product-ids").value = "";
+  $("#product-progress-filter").value = "pending";
+  $("#match-results").hidden = true;
+  await loadBatches();
   $("#batch-filter").value = result.batch.id;
   await loadTasks();
+  renderProducts();
+  toast(
+    result.started
+      ? `批次已创建并启动：有效 ${result.batch.validRows}，重复 ${result.batch.duplicateRows}，可继续选择下一组 20 个`
+      : `批次已创建：有效 ${result.batch.validRows}，重复 ${result.batch.duplicateRows}，可继续选择下一组 20 个`,
+  );
 }
 
 async function refresh() {
@@ -327,13 +412,36 @@ $("#import-form").addEventListener("submit", async (event) => {
 });
 
 $("#product-filter").addEventListener("input", renderProducts);
+$("#product-progress-filter").addEventListener("change", renderProducts);
 $("#manual-product-ids").addEventListener("input", renderProductSelectionSummary);
 $("#product-select-all").addEventListener("change", (event) => {
-  for (const product of visibleProducts()) {
-    if (event.currentTarget.checked) state.selectedProductIds.add(product.id);
-    else state.selectedProductIds.delete(product.id);
+  const products = visibleProducts();
+  if (!event.currentTarget.checked) {
+    for (const product of products) state.selectedProductIds.delete(product.id);
+    renderProducts();
+    return;
+  }
+
+  const selected = new Set(allSelectedProductIds());
+  let skipped = 0;
+  for (const product of products) {
+    if (selected.has(product.id)) {
+      state.selectedProductIds.add(product.id);
+    } else if (selected.size < MAX_PRODUCTS_PER_MATCH) {
+      state.selectedProductIds.add(product.id);
+      selected.add(product.id);
+    } else {
+      skipped += 1;
+    }
   }
   renderProducts();
+  if (skipped > 0) toast(`单次最多选择 ${MAX_PRODUCTS_PER_MATCH} 个，已保留前 ${MAX_PRODUCTS_PER_MATCH} 个`);
+});
+$("#match-select-all").addEventListener("change", (event) => {
+  for (const input of document.querySelectorAll("[data-match-index]:not(:disabled)")) {
+    input.checked = event.currentTarget.checked;
+  }
+  syncMatchSelectionState();
 });
 $("#match-shop-select").addEventListener("change", () => {
   state.products = [];
@@ -342,6 +450,8 @@ $("#match-shop-select").addEventListener("change", () => {
   state.productSource = null;
   state.selectedProductIds.clear();
   $("#manual-product-ids").value = "";
+  $("#product-filter").value = "";
+  $("#product-progress-filter").value = "all";
   $("#match-results").hidden = true;
   renderProducts();
 });
@@ -352,11 +462,25 @@ $("#match-channel").addEventListener("change", () => {
 });
 
 document.addEventListener("change", (event) => {
+  const matchInput = event.target.closest("[data-match-index]");
+  if (matchInput) {
+    syncMatchSelectionState();
+    return;
+  }
   const input = event.target.closest("[data-product-id]");
   if (!input) return;
-  if (input.checked) state.selectedProductIds.add(input.dataset.productId);
-  else state.selectedProductIds.delete(input.dataset.productId);
-  renderProductSelectionSummary();
+  if (input.checked) {
+    const selected = new Set(allSelectedProductIds());
+    if (!selected.has(input.dataset.productId) && selected.size >= MAX_PRODUCTS_PER_MATCH) {
+      input.checked = false;
+      toast(`单次最多选择 ${MAX_PRODUCTS_PER_MATCH} 个商品`, true);
+      return;
+    }
+    state.selectedProductIds.add(input.dataset.productId);
+  } else {
+    state.selectedProductIds.delete(input.dataset.productId);
+  }
+  renderProducts();
 });
 
 document.addEventListener("click", async (event) => {
@@ -370,6 +494,8 @@ document.addEventListener("click", async (event) => {
       window.location.assign("/api/oauth/tiktok/start");
     } else if (button.id === "load-more-products") {
       await loadProducts(true);
+    } else if (button.id === "select-next-pending") {
+      await selectNextPendingProducts();
     } else if (button.id === "match-products") {
       await matchSelectedProducts();
     } else if (button.id === "create-match-batch") {

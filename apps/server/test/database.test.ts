@@ -46,6 +46,21 @@ test("encrypts tokens and persists a deduplicated task queue", () => {
     });
     assert.equal(first.validRows, 1);
     assert.deepEqual(database.existingOpportunityIds(shop.id, "product-1"), ["opp-1"]);
+    const initialProgress = database.productSubmissionProgress(shop.id, [
+      "product-1",
+      "product-2",
+      "product-1",
+    ]);
+    assert.equal(initialProgress.get("product-1")?.state, "in_submission");
+    assert.equal(initialProgress.get("product-1")?.taskCount, 1);
+    assert.deepEqual(initialProgress.get("product-1")?.statusCounts, { ready: 1 });
+    assert.ok(initialProgress.get("product-1")?.latestUpdatedAt);
+    assert.deepEqual(initialProgress.get("product-2"), {
+      state: "pending",
+      taskCount: 0,
+      statusCounts: {},
+      latestUpdatedAt: null,
+    });
 
     const duplicate = database.createBatch({
       filename: "duplicate.csv",
@@ -65,6 +80,8 @@ test("encrypts tokens and persists a deduplicated task queue", () => {
       submissionId: "submission-1",
     });
     assert.equal(completed?.submissionId, "submission-1");
+    const completedProgress = database.productSubmissionProgress(shop.id, ["product-1"]);
+    assert.deepEqual(completedProgress.get("product-1")?.statusCounts, { submitted: 1 });
   } finally {
     database.close();
     rmSync(directory, { recursive: true, force: true });

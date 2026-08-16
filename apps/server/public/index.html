@@ -67,13 +67,24 @@
           <button class="primary align-end" id="load-products" type="button">读取店铺商品</button>
           <button class="ghost align-end" id="load-more-products" type="button" hidden>加载更多</button>
         </div>
+        <div class="product-progress-bar">
+          <label>提报进度
+            <select id="product-progress-filter">
+              <option value="all">全部商品</option>
+              <option value="pending">待匹配提报</option>
+              <option value="in_submission">已进入提报</option>
+            </select>
+          </label>
+          <p id="product-progress-summary" class="hint">读取商品后会根据本地提报台账显示进度。</p>
+          <button class="ghost" id="select-next-pending" type="button">筛选并选择下 20 个</button>
+        </div>
         <label class="manual-product-label">直接填写 Product ID（可选，每行或逗号分隔）
           <textarea id="manual-product-ids" rows="3" placeholder="无法从列表找到时，可在这里粘贴 Product ID"></textarea>
         </label>
         <div class="table-wrap compact-table">
           <table class="product-table">
-            <thead><tr><th><input id="product-select-all" type="checkbox" aria-label="选择本页全部商品" /></th><th>商品</th><th>类目 / 品牌</th><th>状态</th><th>价格</th></tr></thead>
-            <tbody id="product-rows"><tr><td colspan="5" class="empty">点击“读取店铺商品”，或直接填写 Product ID</td></tr></tbody>
+            <thead><tr><th><input id="product-select-all" type="checkbox" aria-label="选择当前筛选商品，最多 20 个" /></th><th>商品</th><th>类目 / 品牌</th><th>状态</th><th>价格</th><th>提报进度</th></tr></thead>
+            <tbody id="product-rows"><tr><td colspan="6" class="empty">点击“读取店铺商品”，或直接填写 Product ID</td></tr></tbody>
           </table>
         </div>
         <div class="match-action-row">
@@ -87,16 +98,17 @@
               <h3>匹配结果</h3>
               <p id="match-summary" class="hint"></p>
             </div>
-            <p class="hint">高置信度仅作推荐，系统不会自动勾选；请逐条确认。</p>
+            <p class="hint">全选只会勾选通过完整规则复核的高置信度结果。</p>
           </div>
           <div class="table-wrap">
             <table class="match-table">
-              <thead><tr><th>选择</th><th>商品</th><th>匹配机会</th><th>得分</th><th>匹配依据</th></tr></thead>
+              <thead><tr><th><input id="match-select-all" type="checkbox" aria-label="全选可提报匹配结果" /></th><th>商品</th><th>匹配机会</th><th>得分</th><th>匹配依据</th></tr></thead>
               <tbody id="match-rows"></tbody>
             </table>
           </div>
           <div id="match-warnings" class="warning-list" hidden></div>
           <div class="result-controls">
+            <span id="match-selection-summary" class="hint">已选 0 个可提报结果</span>
             <label>执行通道
               <select id="match-channel">
                 <option value="api">A · 官方 API</option>

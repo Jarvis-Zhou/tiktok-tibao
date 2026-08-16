@@ -51,6 +51,13 @@ export interface TaskFilters {
   limit?: number;
 }
 
+export interface ProductSubmissionProgress {
+  state: "pending" | "in_submission";
+  taskCount: number;
+  statusCounts: Partial<Record<TaskStatus, number>>;
+  latestUpdatedAt: string | null;
+}
+
 export interface CompleteTaskInput {
   status: TaskStatus;
   submissionId?: string | null;
@@ -302,6 +309,7 @@ export class TibaoDatabase {
       CREATE INDEX IF NOT EXISTS idx_tasks_batch_status ON tasks(batch_id, status);
       CREATE INDEX IF NOT EXISTS idx_tasks_channel_status ON tasks(channel, status, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(status, lease_expires_at);
+      CREATE INDEX IF NOT EXISTS idx_tasks_shop_product ON tasks(shop_id, product_id, status);
       CREATE INDEX IF NOT EXISTS idx_oauth_states_expiry ON oauth_states(expires_at);
       CREATE INDEX IF NOT EXISTS idx_captured_products_updated
         ON captured_products(shop_id, updated_at DESC);
@@ -766,6 +774,45 @@ export class TibaoDatabase {
       .prepare("SELECT opportunity_id FROM tasks WHERE shop_id = ? AND product_id = ?")
       .all(shopId, productId) as SqlRow[];
     return rows.map((row) => String(row.opportunity_id));
+  }
+
+  productSubmissionProgress(
+    shopId: string,
+    productIds: string[],
+  ): Map<string, ProductSubmissionProgress> {
+    const uniqueIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
+    const progress = new Map<string, ProductSubmissionProgress>(
+      uniqueIds.map((productId) => [
+        productId,
+        { state: "pending", taskCount: 0, statusCounts: {}, latestUpdatedAt: null },
+      ]),
+    );
+    if (uniqueIds.length === 0) return progress;
+
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = this.raw
+      .prepare(
+        `SELECT product_id, status, COUNT(*) AS task_count, MAX(updated_at) AS latest_updated_at
+         FROM tasks
+         WHERE shop_id = ? AND product_id IN (${placeholders})
+         GROUP BY product_id, status`,
+      )
+      .all(shopId, ...uniqueIds) as SqlRow[];
+    for (const row of rows) {
+      const productId = String(row.product_id);
+      const status = String(row.status) as TaskStatus;
+      const count = Number(row.task_count);
+      const current = progress.get(productId);
+      if (!current) continue;
+      current.state = "in_submission";
+      current.taskCount += count;
+      current.statusCounts[status] = count;
+      const latestUpdatedAt = String(row.latest_updated_at);
+      if (!current.latestUpdatedAt || latestUpdatedAt > current.latestUpdatedAt) {
+        current.latestUpdatedAt = latestUpdatedAt;
+      }
+    }
+    return progress;
   }
 
   claimNextTask(

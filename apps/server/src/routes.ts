@@ -19,6 +19,7 @@ import { isTikTokAppConfigured } from "./config.js";
 import type {
   CapturedOpportunityInput,
   CapturedProductInput,
+  ProductSubmissionProgress,
   TibaoDatabase,
 } from "./database.js";
 import type { ApiRunner } from "./runner.js";
@@ -223,6 +224,26 @@ function parseSnapshotArray<T>(
 function csvCell(value: unknown): string {
   const string = String(value ?? "");
   return /[",\r\n]/.test(string) ? `"${string.replaceAll('"', '""')}"` : string;
+}
+
+function withSubmissionProgress<T extends { id: string }>(
+  database: TibaoDatabase,
+  shopId: string,
+  products: T[],
+): Array<T & { submissionProgress: ProductSubmissionProgress }> {
+  const progress = database.productSubmissionProgress(
+    shopId,
+    products.map((product) => product.id),
+  );
+  return products.map((product) => ({
+    ...product,
+    submissionProgress: progress.get(product.id) ?? {
+      state: "pending",
+      taskCount: 0,
+      statusCounts: {},
+      latestUpdatedAt: null,
+    },
+  }));
 }
 
 export function isAllowedCaptureSource(value: string): boolean {
@@ -467,7 +488,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       const hasMore = page.length > normalizedPageSize;
       const products = page.slice(0, normalizedPageSize);
       return {
-        products,
+        products: withSubmissionProgress(database, request.params.id, products),
         nextPageToken: hasMore ? String(offset + products.length) : null,
         requestId: null,
         source: "extension" as const,
@@ -480,7 +501,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       pageSize: normalizedPageSize,
       ...(text(request.query.pageToken) ? { pageToken: text(request.query.pageToken) } : {}),
     });
-    return { ...result, source: "api" as const };
+    return {
+      ...result,
+      products: withSubmissionProgress(database, request.params.id, result.products),
+      source: "api" as const,
+    };
   });
 
   app.post<{
@@ -587,7 +612,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       rows.some((row) => normalizeChannel(row.channel) === "api")
         ? runner.startBatch(batch.id)
         : false;
-    return reply.code(201).send({ batch, started });
+    const productIds = [...new Set(validation.valid.map((row) => row.input.productId))];
+    const productProgress = Object.fromEntries(
+      database.productSubmissionProgress(shopId, productIds),
+    );
+    return reply.code(201).send({ batch, started, productProgress });
   });
 
   app.get("/api/batches", async () => ({ batches: database.listBatches() }));

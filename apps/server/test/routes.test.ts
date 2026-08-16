@@ -243,6 +243,8 @@ test("requires explicit confirmation before creating a matched batch", async () 
     assert.equal(confirmed.statusCode, 201);
     const body = confirmed.json();
     assert.equal(body.batch.validRows, 1);
+    assert.equal(body.productProgress["product-1"].state, "in_submission");
+    assert.deepEqual(body.productProgress["product-1"].statusCounts, { ready: 1 });
     const createdTask = database.listTasks({ batchId: body.batch.id })[0];
     assert.equal(createdTask?.channel, "extension");
     database.completeTask(createdTask?.id ?? "", { status: "rejected" });
@@ -343,6 +345,38 @@ test("imports extension-captured products with shared-key authentication", async
     assert.equal(listed.json().source, "extension");
     assert.equal(listed.json().products[0].id, "1729384756102938475");
     assert.equal(listed.json().products[0].stock, 48);
+    assert.deepEqual(listed.json().products[0].submissionProgress, {
+      state: "pending",
+      taskCount: 0,
+      statusCounts: {},
+      latestUpdatedAt: null,
+    });
+
+    database.createBatch({
+      filename: "progress-test.csv",
+      source: "test",
+      validRows: [
+        {
+          input: {
+            sourceRow: 2,
+            shopId: shop.id,
+            productId: "1729384756102938475",
+            opportunityId: "opportunity-progress-test",
+            channel: "extension",
+          },
+          key: "progress-test",
+        },
+      ],
+      invalidRows: [],
+      totalRows: 1,
+    });
+    const relisted = await app.inject({
+      method: "GET",
+      url: `/api/shops/${shop.id}/products`,
+    });
+    assert.equal(relisted.json().products[0].submissionProgress.state, "in_submission");
+    assert.equal(relisted.json().products[0].submissionProgress.taskCount, 1);
+    assert.deepEqual(relisted.json().products[0].submissionProgress.statusCounts, { ready: 1 });
   } finally {
     await app.close();
     database.close();
