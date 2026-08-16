@@ -14,7 +14,18 @@ const globalSellingPattern = "https://seller.tiktokshopglobalselling.com/*";
 test("injects the content script into TikTok Shop Global Selling", () => {
   assert.ok(manifest.host_permissions.includes(globalSellingPattern));
   assert.ok(manifest.content_scripts.some(
-    (entry) => entry.matches.includes(globalSellingPattern) && entry.js.includes("content.js"),
+    (entry) =>
+      entry.matches.includes(globalSellingPattern)
+      && entry.js.includes("content.js")
+      && entry.run_at === "document_start"
+      && entry.world === "ISOLATED",
+  ));
+  assert.ok(manifest.content_scripts.some(
+    (entry) =>
+      entry.matches.includes(globalSellingPattern)
+      && entry.js.includes("page-capture.js")
+      && entry.run_at === "document_start"
+      && entry.world === "MAIN",
   ));
 });
 

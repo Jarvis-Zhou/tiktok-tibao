@@ -1,13 +1,18 @@
 {
   "name": "@tibao/extension",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build --workspace @tibao/core",
     "build": "node build.mjs",
     "package": "npm run build && node package.mjs",
-    "test": "node --test test/manifest.test.mjs",
+    "pretest": "npm run build --workspace @tibao/core",
+    "test": "tsx --test test/**/*.test.ts && node --test test/manifest.test.mjs",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tibao/core": "*"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.315",

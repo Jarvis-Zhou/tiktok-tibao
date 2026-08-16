@@ -11,7 +11,11 @@ import {
 } from "@tibao/core";
 import type { AppConfig } from "./config.js";
 import { isTikTokAppConfigured } from "./config.js";
-import type { CapturedProductInput, TibaoDatabase } from "./database.js";
+import type {
+  CapturedOpportunityInput,
+  CapturedProductInput,
+  TibaoDatabase,
+} from "./database.js";
 import type { ApiRunner } from "./runner.js";
 import type { TokenVault } from "./token-vault.js";
 
@@ -24,6 +28,158 @@ export interface RouteDependencies {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+class SnapshotValidationError extends Error {}
+
+function asRecord(value: unknown): UnknownRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new SnapshotValidationError("快照条目格式无效");
+  }
+  return value as UnknownRecord;
+}
+
+function stringList(
+  value: unknown,
+  label: string,
+  maximumItems = 100,
+  maximumLength = 300,
+): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > maximumItems) {
+    throw new SnapshotValidationError(`${label} 格式无效`);
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    const normalized = text(item);
+    if (!normalized) continue;
+    if (normalized.length > maximumLength) {
+      throw new SnapshotValidationError(`${label} 包含过长文本`);
+    }
+    if (!result.includes(normalized)) result.push(normalized);
+  }
+  return result;
+}
+
+function nullableNumber(value: unknown, label: string): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new SnapshotValidationError(`${label} 无效`);
+  }
+  return value;
+}
+
+function parseCapturedProduct(value: unknown, index: number): CapturedProductInput {
+  const raw = asRecord(value);
+  const prefix = `第 ${index + 1} 个商品`;
+  const id = text(raw.id);
+  const title = text(raw.title) || id;
+  const status = text(raw.status);
+  const categoryName = text(raw.categoryName);
+  const categoryIds = stringList(raw.categoryIds, `${prefix}类目 ID`, 30, 128);
+  const parsedCategoryNames = stringList(raw.categoryNames, `${prefix}类目名称`, 30, 300);
+  const categoryNames = parsedCategoryNames.length > 0
+    ? parsedCategoryNames
+    : categoryName
+      ? [categoryName]
+      : [];
+  const brandName = text(raw.brandName);
+  const keywords = stringList(raw.keywords, `${prefix}关键词`, 100, 300);
+  const attributes = stringList(raw.attributes, `${prefix}属性`, 200, 500);
+  const currency = text(raw.currency).toUpperCase();
+  if (!id || id.length > 128 || !/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new SnapshotValidationError(`${prefix} ID 无效`);
+  }
+  if (
+    title.length > 500 ||
+    status.length > 100 ||
+    categoryName.length > 300 ||
+    brandName.length > 200
+  ) {
+    throw new SnapshotValidationError(`${prefix}文本字段过长`);
+  }
+  if (currency && !/^[A-Z]{3}$/.test(currency)) {
+    throw new SnapshotValidationError(`${prefix}币种无效`);
+  }
+  const stockValue = raw.stock;
+  if (
+    stockValue !== null &&
+    stockValue !== undefined &&
+    (typeof stockValue !== "number" || !Number.isSafeInteger(stockValue) || stockValue < 0)
+  ) {
+    throw new SnapshotValidationError(`${prefix}库存无效`);
+  }
+  return {
+    id,
+    title,
+    status: status || null,
+    categoryIds,
+    categoryNames,
+    brandName: brandName || null,
+    keywords,
+    attributes,
+    price: nullableNumber(raw.price, `${prefix}价格`),
+    currency: currency || null,
+    stock: typeof stockValue === "number" ? stockValue : null,
+  };
+}
+
+function parseCapturedOpportunity(value: unknown, index: number): CapturedOpportunityInput {
+  const raw = asRecord(value);
+  const prefix = `第 ${index + 1} 个机会`;
+  const id = text(raw.id);
+  const title = text(raw.title) || id;
+  const type = text(raw.type);
+  const status = text(raw.status);
+  const currency = text(raw.currency).toUpperCase();
+  if (!id || id.length > 128 || !/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new SnapshotValidationError(`${prefix} ID 无效`);
+  }
+  if (title.length > 500 || type.length > 100 || status.length > 100) {
+    throw new SnapshotValidationError(`${prefix}文本字段过长`);
+  }
+  if (currency && !/^[A-Z]{3}$/.test(currency)) {
+    throw new SnapshotValidationError(`${prefix}币种无效`);
+  }
+  if (raw.active !== null && raw.active !== undefined && typeof raw.active !== "boolean") {
+    throw new SnapshotValidationError(`${prefix} active 无效`);
+  }
+  for (const key of ["expired", "fulfilled"] as const) {
+    if (raw[key] !== undefined && typeof raw[key] !== "boolean") {
+      throw new SnapshotValidationError(`${prefix} ${key} 无效`);
+    }
+  }
+  return {
+    id,
+    title,
+    type,
+    status: status || null,
+    active: typeof raw.active === "boolean" ? raw.active : null,
+    expired: raw.expired === true,
+    fulfilled: raw.fulfilled === true,
+    categoryIds: stringList(raw.categoryIds, `${prefix}类目 ID`, 30, 128),
+    categoryNames: stringList(raw.categoryNames, `${prefix}类目名称`, 30, 300),
+    brandNames: stringList(raw.brandNames, `${prefix}品牌`, 100, 200),
+    keywords: stringList(raw.keywords, `${prefix}关键词`, 200, 300),
+    allowedProductStatuses: stringList(raw.allowedProductStatuses, `${prefix}商品状态`, 50, 100),
+    referencePrice: nullableNumber(raw.referencePrice, `${prefix}参考价格`),
+    minPrice: nullableNumber(raw.minPrice, `${prefix}最低价格`),
+    maxPrice: nullableNumber(raw.maxPrice, `${prefix}最高价格`),
+    currency: currency || null,
+  };
+}
+
+function parseSnapshotArray<T>(
+  value: unknown,
+  label: string,
+  parser: (item: unknown, index: number) => T,
+): T[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new SnapshotValidationError(`${label}必须是数组`);
+  if (value.length > 2_000) throw new SnapshotValidationError(`单次最多导入 2000 个${label}`);
+  return value.map(parser);
 }
 
 function csvCell(value: unknown): string {
@@ -124,23 +280,30 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (!["auto", "api", "extension"].includes(source)) {
       return reply.code(400).send({ error: "source 仅支持 auto、api 或 extension" });
     }
-    const pageSize = Number.parseInt(request.query.pageSize ?? "50", 10);
-    const normalizedPageSize = Number.isFinite(pageSize) ? pageSize : 50;
+    const pageSize = Number.parseInt(request.query.pageSize ?? "100", 10);
+    const normalizedPageSize = Math.min(Math.max(Number.isFinite(pageSize) ? pageSize : 100, 1), 100);
     const useCaptured =
       source === "extension" ||
       (source === "auto" && (!runner.configured || !shop.apiConfigured));
     if (useCaptured) {
-      const products = database
-        .listCapturedProducts(request.params.id, normalizedPageSize)
-        .map((product) => ({
-          ...product,
-          categoryIds: [],
-          keywords: [],
-          attributes: [],
-        }));
+      const rawOffset = text(request.query.pageToken) || "0";
+      if (!/^\d+$/.test(rawOffset)) {
+        return reply.code(400).send({ error: "插件商品分页标记无效" });
+      }
+      const offset = Number(rawOffset);
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        return reply.code(400).send({ error: "插件商品分页标记无效" });
+      }
+      const page = database.listCapturedProducts(
+        request.params.id,
+        normalizedPageSize + 1,
+        offset,
+      );
+      const hasMore = page.length > normalizedPageSize;
+      const products = page.slice(0, normalizedPageSize);
       return {
         products,
-        nextPageToken: null,
+        nextPageToken: hasMore ? String(offset + products.length) : null,
         requestId: null,
         source: "extension" as const,
       };
@@ -156,16 +319,14 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
   });
 
   app.post<{
-    Body: { shopId?: string; productIds?: unknown };
+    Body: { shopId?: string; productIds?: unknown; source?: string };
   }>("/api/opportunity-matches", async (request, reply) => {
-    if (!runner.configured) {
-      return reply.code(400).send({ error: "TikTok API 或 Token 加密配置不完整" });
-    }
     const shopId = text(request.body?.shopId);
     const productIds = Array.isArray(request.body?.productIds)
       ? request.body.productIds.map(text).filter(Boolean)
       : [];
-    if (!shopId || !database.getShop(shopId)) {
+    const shop = shopId ? database.getShop(shopId) : null;
+    if (!shopId || !shop) {
       return reply.code(400).send({ error: "请选择有效店铺" });
     }
     if (productIds.length === 0) {
@@ -174,7 +335,28 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (productIds.length > 20) {
       return reply.code(400).send({ error: "MVP 单次最多匹配 20 个商品" });
     }
-    return runner.matchProducts(shopId, productIds);
+    const requestedSource = text(request.body?.source) || "auto";
+    if (!["auto", "api", "extension"].includes(requestedSource)) {
+      return reply.code(400).send({ error: "source 仅支持 auto、api 或 extension" });
+    }
+    const source = requestedSource === "auto"
+      ? runner.configured && shop.apiConfigured
+        ? "api"
+        : "extension"
+      : requestedSource;
+    if (source === "api") {
+      if (!runner.configured || !shop.apiConfigured) {
+        return reply.code(400).send({ error: "该店铺未配置可用的 TikTok API 凭证" });
+      }
+      return { ...(await runner.matchProducts(shopId, productIds)), source };
+    }
+    try {
+      return { ...runner.matchCapturedProducts(shopId, productIds), source };
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : "插件快照匹配失败",
+      });
+    }
   });
 
   app.post<{
@@ -412,16 +594,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       shopId?: unknown;
       sourceUrl?: unknown;
       capturedAt?: unknown;
-      products?: Array<{
-        id?: unknown;
-        title?: unknown;
-        status?: unknown;
-        categoryName?: unknown;
-        brandName?: unknown;
-        price?: unknown;
-        currency?: unknown;
-        stock?: unknown;
-      }>;
+      products?: unknown;
     };
   }>("/api/extension/products/import", async (request, reply) => {
     if (!verifyExtension(request, reply, config)) return;
@@ -433,65 +606,100 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (!isAllowedCaptureSource(sourceUrl)) {
       return reply.code(400).send({ error: "仅允许导入 Seller Center 或本地测试页采集的数据" });
     }
-    const rawProducts = request.body?.products;
-    if (!Array.isArray(rawProducts) || rawProducts.length === 0) {
-      return reply.code(400).send({ error: "没有可导入的商品" });
-    }
-    if (rawProducts.length > 200) {
-      return reply.code(400).send({ error: "当前页单次最多导入 200 个商品" });
-    }
     const capturedAtText = text(request.body?.capturedAt);
     const capturedAt = capturedAtText || new Date().toISOString();
     if (!Number.isFinite(Date.parse(capturedAt))) {
       return reply.code(400).send({ error: "capturedAt 不是有效时间" });
     }
 
-    const products = new Map<string, CapturedProductInput>();
-    for (const [index, raw] of rawProducts.entries()) {
-      const id = text(raw?.id);
-      const title = text(raw?.title) || id;
-      const status = text(raw?.status);
-      const categoryName = text(raw?.categoryName);
-      const brandName = text(raw?.brandName);
-      const currency = text(raw?.currency).toUpperCase();
-      if (!id || id.length > 128 || !/^[A-Za-z0-9_-]+$/.test(id)) {
-        return reply.code(400).send({ error: `第 ${index + 1} 个商品 ID 无效` });
+    let parsedProducts: CapturedProductInput[];
+    try {
+      parsedProducts = parseSnapshotArray(
+        request.body?.products,
+        "商品",
+        parseCapturedProduct,
+      );
+    } catch (error) {
+      if (error instanceof SnapshotValidationError) {
+        return reply.code(400).send({ error: error.message });
       }
-      if (title.length > 500 || status.length > 100 || categoryName.length > 300 || brandName.length > 200) {
-        return reply.code(400).send({ error: `第 ${index + 1} 个商品文本字段过长` });
-      }
-      if (currency && !/^[A-Z]{3}$/.test(currency)) {
-        return reply.code(400).send({ error: `第 ${index + 1} 个商品币种无效` });
-      }
-      const price = raw.price === null || raw.price === undefined ? null : raw.price;
-      const stock = raw.stock === null || raw.stock === undefined ? null : raw.stock;
-      if (price !== null && (typeof price !== "number" || !Number.isFinite(price) || price < 0)) {
-        return reply.code(400).send({ error: `第 ${index + 1} 个商品价格无效` });
-      }
-      if (
-        stock !== null &&
-        (typeof stock !== "number" || !Number.isSafeInteger(stock) || stock < 0)
-      ) {
-        return reply.code(400).send({ error: `第 ${index + 1} 个商品库存无效` });
-      }
-      products.set(id, {
-        id,
-        title,
-        status: status || null,
-        categoryName: categoryName || null,
-        brandName: brandName || null,
-        price,
-        currency: currency || null,
-        stock,
-      });
+      throw error;
     }
+    if (parsedProducts.length === 0) {
+      return reply.code(400).send({ error: "没有可导入的商品" });
+    }
+    const products = [...new Map(parsedProducts.map((product) => [product.id, product])).values()];
     const result = database.upsertCapturedProducts({
       shopId,
       sourceUrl,
       capturedAt,
-      products: [...products.values()],
+      products,
     });
     return reply.code(201).send({ result });
+  });
+
+  app.post<{
+    Body: {
+      shopId?: unknown;
+      sourceUrl?: unknown;
+      capturedAt?: unknown;
+      products?: unknown;
+      opportunities?: unknown;
+    };
+  }>("/api/extension/snapshots/import", async (request, reply) => {
+    if (!verifyExtension(request, reply, config)) return;
+    const shopId = text(request.body?.shopId);
+    if (!shopId || !database.getShop(shopId)) {
+      return reply.code(400).send({ error: "请在插件设置中填写有效的本地店铺 ID" });
+    }
+    const sourceUrl = text(request.body?.sourceUrl);
+    if (!isAllowedCaptureSource(sourceUrl)) {
+      return reply.code(400).send({ error: "仅允许导入 Seller Center 或本地测试页采集的数据" });
+    }
+    const capturedAtText = text(request.body?.capturedAt);
+    const capturedAt = capturedAtText || new Date().toISOString();
+    if (!Number.isFinite(Date.parse(capturedAt))) {
+      return reply.code(400).send({ error: "capturedAt 不是有效时间" });
+    }
+    let products: CapturedProductInput[];
+    let opportunities: CapturedOpportunityInput[];
+    try {
+      products = parseSnapshotArray(request.body?.products, "商品", parseCapturedProduct);
+      opportunities = parseSnapshotArray(
+        request.body?.opportunities,
+        "机会",
+        parseCapturedOpportunity,
+      );
+    } catch (error) {
+      if (error instanceof SnapshotValidationError) {
+        return reply.code(400).send({ error: error.message });
+      }
+      throw error;
+    }
+    if (products.length === 0 && opportunities.length === 0) {
+      return reply.code(400).send({ error: "当前页没有可导入的商品或机会快照" });
+    }
+    const uniqueProducts = [
+      ...new Map(products.map((product) => [product.id, product])).values(),
+    ];
+    const uniqueOpportunities = [
+      ...new Map(opportunities.map((opportunity) => [opportunity.id, opportunity])).values(),
+    ];
+    const productResult = database.upsertCapturedProducts({
+      shopId,
+      sourceUrl,
+      capturedAt,
+      products: uniqueProducts,
+    });
+    const opportunityResult = database.upsertCapturedOpportunities({
+      shopId,
+      sourceUrl,
+      capturedAt,
+      opportunities: uniqueOpportunities,
+    });
+    return reply.code(201).send({
+      result: { products: productResult, opportunities: opportunityResult },
+    });
   });
 
   app.get<{

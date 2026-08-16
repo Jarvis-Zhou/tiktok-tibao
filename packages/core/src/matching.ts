@@ -130,7 +130,7 @@ function unwrap(value: unknown, keys: string[]): UnknownRecord {
   const record = asRecord(value) ?? {};
   for (const key of keys) {
     const nested = asRecord(record[key]);
-    if (nested) return nested;
+    if (nested) return { ...record, ...nested };
   }
   const data = asRecord(record.data);
   return data ? unwrap(data, keys) : record;
@@ -162,10 +162,14 @@ function collectContextStrings(
 ): string[] {
   if (depth > 8 || value === null || value === undefined) return [];
   if (Array.isArray(value)) {
-    return value.flatMap((item) => collectContextStrings(item, contextPattern, valueKeyPattern, depth + 1, inContext));
+    return value.flatMap((item) =>
+      item !== null && typeof item === "object"
+        ? collectContextStrings(item, contextPattern, valueKeyPattern, depth + 1, inContext)
+        : [],
+    );
   }
   const record = asRecord(value);
-  if (!record) return inContext ? [textValue(value)].filter((item): item is string => item !== null) : [];
+  if (!record) return [];
   const results: string[] = [];
   for (const [key, child] of Object.entries(record)) {
     const normalizedKey = key.toLowerCase();
@@ -189,18 +193,32 @@ function collectContextStrings(
 }
 
 function collectCategoryData(value: unknown): { ids: string[]; names: string[] } {
-  const ids = collectContextStrings(value, /categor/, /(^id$|_id$|category_id|parent_id)/);
-  const names = collectContextStrings(value, /categor/, /(^name$|_name$|local_name|display_name)/);
+  const ids = collectContextStrings(
+    value,
+    /categor/,
+    /(^id$|_id$|category_?id|parent_?id|leaf_?category_?id)/,
+  );
+  const names = collectContextStrings(
+    value,
+    /categor/,
+    /(^name$|_name$|category_?name|local_?name|display_?name)/,
+  );
   return { ids: unique(ids), names: unique(names) };
 }
 
 function collectBrandNames(value: unknown): string[] {
-  const direct = [firstText(value, ["brand_name", "required_brand_name", "brand.name"])].filter(
-    (item): item is string => item !== null,
-  );
+  const direct = [
+    firstText(value, [
+      "brand_name",
+      "brandName",
+      "required_brand_name",
+      "requiredBrandName",
+      "brand.name",
+    ]),
+  ].filter((item): item is string => item !== null);
   return unique([
     ...direct,
-    ...collectContextStrings(value, /brand/, /(^name$|_name$|brand_name)/),
+    ...collectContextStrings(value, /brand/, /(^name$|_name$|brand_?name)/),
   ]);
 }
 
@@ -250,7 +268,7 @@ function findCurrency(value: unknown): string | null {
     }
     return null;
   }
-  const direct = firstText(value, ["currency", "currency_code", "price.currency"]);
+  const direct = firstText(value, ["currency", "currency_code", "currencyCode", "price.currency"]);
   if (direct) return direct;
   const record = asRecord(value);
   if (!record) return null;
@@ -280,11 +298,26 @@ function isPastTimestamp(value: unknown, now: number): boolean {
 }
 
 export function extractProductRecords(value: unknown): UnknownRecord[] {
-  return extractRecords(value, ["products", "product_list", "items"]);
+  return extractRecords(value, [
+    "products",
+    "product_list",
+    "productList",
+    "product_infos",
+    "productInfos",
+    "items",
+  ]);
 }
 
 export function extractOpportunityRecords(value: unknown): UnknownRecord[] {
-  return extractRecords(value, ["opportunities", "opportunity_list", "items"]);
+  return extractRecords(value, [
+    "opportunities",
+    "opportunity_list",
+    "opportunityList",
+    "opportunity_infos",
+    "opportunityInfos",
+    "recommendations",
+    "items",
+  ]);
 }
 
 export function extractNextPageToken(value: unknown, depth = 0): string | null {
@@ -307,15 +340,28 @@ export function normalizeProduct(value: unknown, fallbackId = ""): ProductSnapsh
   const price =
     firstNumber(product, [
       "price.tax_exclusive_price",
+      "price.taxExclusivePrice",
       "price.amount",
       "sale_price",
+      "salePrice",
       "retail_price",
+      "retailPrice",
       "skus.0.price.tax_exclusive_price",
-    ]) ?? findNestedNumber(product, /(sale_price|retail_price|tax_exclusive_price|^price$)/);
+      "skus.0.price.taxExclusivePrice",
+    ]) ?? findNestedNumber(
+      product,
+      /(sale_?price|retail_?price|tax_?exclusive_?price|^price$)/,
+    );
   return {
-    id: firstText(product, ["id", "product_id"]) ?? fallbackId,
-    title: firstText(product, ["title", "product_name", "name"]) ?? fallbackId,
-    status: firstText(product, ["status", "product_status", "audit_status"]),
+    id: firstText(product, ["product_id", "productId", "id"]) ?? fallbackId,
+    title: firstText(product, ["title", "product_name", "productName", "name"]) ?? fallbackId,
+    status: firstText(product, [
+      "status",
+      "product_status",
+      "productStatus",
+      "audit_status",
+      "auditStatus",
+    ]),
     categoryIds: categories.ids,
     categoryNames: categories.names,
     brandName,
@@ -333,9 +379,9 @@ export function normalizeOpportunity(
 ): OpportunitySnapshot {
   const opportunity = unwrap(value, ["opportunity"]);
   const categories = collectCategoryData(opportunity);
-  const status = firstText(opportunity, ["status", "opportunity_status"]);
+  const status = firstText(opportunity, ["status", "opportunity_status", "opportunityStatus"]);
   const normalizedStatus = status?.trim().toUpperCase() ?? "";
-  const explicitActive = firstBoolean(opportunity, ["is_active", "active"]);
+  const explicitActive = firstBoolean(opportunity, ["is_active", "isActive", "active"]);
   const active =
     explicitActive ??
     (["ACTIVE", "LIVE", "OPEN", "AVAILABLE"].includes(normalizedStatus)
@@ -345,42 +391,90 @@ export function normalizeOpportunity(
         : null);
   const expiryValue =
     valueAt(opportunity, "expire_time") ??
+    valueAt(opportunity, "expireTime") ??
     valueAt(opportunity, "expiration_time") ??
+    valueAt(opportunity, "expirationTime") ??
     valueAt(opportunity, "expired_at") ??
-    valueAt(opportunity, "end_time");
+    valueAt(opportunity, "expiredAt") ??
+    valueAt(opportunity, "end_time") ??
+    valueAt(opportunity, "endTime");
   const expired =
-    firstBoolean(opportunity, ["is_expired", "expired"]) === true ||
+    firstBoolean(opportunity, ["is_expired", "isExpired", "expired"]) === true ||
     ["EXPIRED", "CLOSED"].includes(normalizedStatus) ||
     isPastTimestamp(expiryValue, now);
   const fulfilled =
-    firstBoolean(opportunity, ["is_fulfilled", "fulfilled"]) === true ||
+    firstBoolean(opportunity, ["is_fulfilled", "isFulfilled", "fulfilled"]) === true ||
     ["FULFILLED", "COMPLETED"].includes(normalizedStatus);
   const referencePriceValue =
-    valueAt(opportunity, "reference_price") ?? valueAt(opportunity, "listing_criteria.reference_price");
+    valueAt(opportunity, "reference_price") ??
+    valueAt(opportunity, "referencePrice") ??
+    valueAt(opportunity, "listing_criteria.reference_price") ??
+    valueAt(opportunity, "listingCriteria.referencePrice");
   const referencePrice =
     numberValue(referencePriceValue) ?? findNestedNumber(referencePriceValue, /(amount|value|price)/);
   const allowedProductStatuses = unique([
-    ...collectContextStrings(opportunity, /product_status/, /(^value$|^name$|status)/),
+    ...collectContextStrings(opportunity, /product_?status/, /(^value$|^name$|status)/),
     ...collectContextStrings(valueAt(opportunity, "listing_criteria"), /status/, /(^value$|^name$|status)/),
+    ...collectContextStrings(valueAt(opportunity, "listingCriteria"), /status/, /(^value$|^name$|status)/),
   ]);
   return {
-    id: firstText(opportunity, ["id", "opportunity_id"]) ?? fallbackId,
+    id:
+      firstText(opportunity, [
+        "opportunity_id",
+        "opportunityId",
+        "recommendation_id",
+        "recommendationId",
+        "id",
+      ]) ?? fallbackId,
     title:
-      firstText(opportunity, ["title", "opportunity_name", "name", "keyword", "recommendation_name"]) ??
+      firstText(opportunity, [
+        "title",
+        "opportunity_name",
+        "opportunityName",
+        "name",
+        "keyword",
+        "recommendation_name",
+        "recommendationName",
+      ]) ??
       fallbackId,
-    type: firstText(opportunity, ["opportunity_type", "type", "action_type"]) ?? "",
+    type:
+      firstText(opportunity, [
+        "opportunity_type",
+        "opportunityType",
+        "type",
+        "action_type",
+        "actionType",
+        "recommendation_type",
+        "recommendationType",
+      ]) ?? "",
     status,
     active,
     expired,
     fulfilled,
     categoryIds: categories.ids,
     categoryNames: categories.names,
-    brandNames: collectBrandNames(valueAt(opportunity, "listing_criteria") ?? opportunity),
+    brandNames: collectBrandNames(
+      valueAt(opportunity, "listing_criteria") ?? valueAt(opportunity, "listingCriteria") ?? opportunity,
+    ),
     keywords: collectKeywords(opportunity),
     allowedProductStatuses,
     referencePrice,
-    minPrice: firstNumber(opportunity, ["min_price", "price_min", "listing_criteria.min_price"]),
-    maxPrice: firstNumber(opportunity, ["max_price", "price_max", "listing_criteria.max_price"]),
+    minPrice: firstNumber(opportunity, [
+      "min_price",
+      "minPrice",
+      "price_min",
+      "priceMin",
+      "listing_criteria.min_price",
+      "listingCriteria.minPrice",
+    ]),
+    maxPrice: firstNumber(opportunity, [
+      "max_price",
+      "maxPrice",
+      "price_max",
+      "priceMax",
+      "listing_criteria.max_price",
+      "listingCriteria.maxPrice",
+    ]),
     currency: findCurrency(referencePriceValue ?? opportunity),
   };
 }

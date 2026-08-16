@@ -1,8 +1,9 @@
 import type {
+  CollectedOpportunity,
   CollectedProduct,
   ExtensionSettings,
   ExtensionTask,
-  ProductImportResult,
+  SnapshotImportResult,
 } from "./types.js";
 
 async function request<T>(
@@ -51,18 +52,19 @@ export async function reportTask(
   });
 }
 
-export async function importProducts(
+export async function importSnapshots(
   settings: ExtensionSettings,
   capture: {
     products: CollectedProduct[];
+    opportunities: CollectedOpportunity[];
     sourceUrl: string;
     capturedAt: string;
   },
-): Promise<ProductImportResult> {
+): Promise<SnapshotImportResult> {
   if (!settings.shopId) throw new Error("请先在设置页填写本地店铺 ID");
-  const response = await request<{ result: ProductImportResult }>(
+  const response = await request<{ result: SnapshotImportResult }>(
     settings,
-    "/api/extension/products/import",
+    "/api/extension/snapshots/import",
     {
       method: "POST",
       body: JSON.stringify({
@@ -70,6 +72,7 @@ export async function importProducts(
         sourceUrl: capture.sourceUrl,
         capturedAt: capture.capturedAt,
         products: capture.products,
+        opportunities: capture.opportunities,
       }),
     },
   );

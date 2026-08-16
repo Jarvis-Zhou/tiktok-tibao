@@ -5,6 +5,7 @@ const state = {
   products: [],
   matches: [],
   nextProductPageToken: null,
+  productSource: null,
   selectedProductIds: new Set(),
 };
 
@@ -175,14 +176,19 @@ function renderProducts() {
 async function loadProducts(append = false) {
   const shopId = $("#match-shop-select").value;
   if (!shopId) throw new Error("请先选择店铺");
-  const params = new URLSearchParams({ pageSize: "50" });
+  const params = new URLSearchParams({
+    pageSize: "100",
+    source: append && state.productSource ? state.productSource : "auto",
+  });
   if (append && state.nextProductPageToken) params.set("pageToken", state.nextProductPageToken);
   const result = await api(`/api/shops/${encodeURIComponent(shopId)}/products?${params}`);
   const merged = append ? [...state.products, ...result.products] : result.products;
   state.products = [...new Map(merged.map((product) => [product.id, product])).values()];
   state.nextProductPageToken = result.nextPageToken;
+  state.productSource = result.source;
   renderProducts();
-  toast(`已读取 ${state.products.length} 个商品${state.nextProductPageToken ? "，还有下一页" : ""}`);
+  const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
+  toast(`已从${sourceLabel}读取 ${state.products.length} 个商品${state.nextProductPageToken ? "，还有下一页" : ""}`);
 }
 
 function confidenceLabel(confidence) {
@@ -191,8 +197,17 @@ function confidenceLabel(confidence) {
 
 function renderMatchResults(result) {
   state.matches = result.matches || [];
+  if (result.source === "extension") {
+    $("#match-channel").value = "extension";
+    $("#run-matched-api").checked = false;
+    $("#run-matched-api").disabled = true;
+  } else {
+    $("#match-channel").value = "api";
+    $("#run-matched-api").disabled = false;
+  }
   $("#match-results").hidden = false;
-  $("#match-summary").textContent = `已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，硬过滤 ${result.blockedPairCount} 个。`;
+  const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
+  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，硬过滤 ${result.blockedPairCount} 个。`;
   $("#match-rows").innerHTML = state.matches.length
     ? state.matches.map((match, index) => `<tr><td><input type="checkbox" data-match-index="${index}" aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${match.recommended ? '<span class="recommendation">推荐候选</span>' : ""}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td><div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`).join("")
     : '<tr><td colspan="5" class="empty">没有通过硬条件过滤的机会，请检查商品类目、品牌和状态。</td></tr>';
@@ -215,7 +230,7 @@ async function matchSelectedProducts() {
     const result = await api("/api/opportunity-matches", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ shopId, productIds }),
+      body: JSON.stringify({ shopId, productIds, source: state.productSource || "auto" }),
     });
     renderMatchResults(result);
     toast(`匹配完成：返回 ${result.matches.length} 个可选组合`);
@@ -297,6 +312,7 @@ $("#match-shop-select").addEventListener("change", () => {
   state.products = [];
   state.matches = [];
   state.nextProductPageToken = null;
+  state.productSource = null;
   state.selectedProductIds.clear();
   $("#manual-product-ids").value = "";
   $("#match-results").hidden = true;

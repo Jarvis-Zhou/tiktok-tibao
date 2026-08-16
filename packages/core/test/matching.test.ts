@@ -68,6 +68,46 @@ test("normalizes nested product and opportunity payloads", () => {
   assert.equal(opportunity.referencePrice, 420);
 });
 
+test("prefers explicit Seller Center IDs and supports camelCase list payloads", () => {
+  const productRecords = extractProductRecords({
+    data: {
+      productList: [
+        {
+          id: "row-wrapper-id",
+          productId: "1729384756102938475",
+          productName: "Organizador de cocina",
+          productStatus: "ACTIVATE",
+          leafCategory: { id: "601234", display_name: "Organizadores de cocina" },
+        },
+      ],
+    },
+  });
+  const product = normalizeProduct(productRecords[0]);
+  assert.equal(product.id, "1729384756102938475");
+  assert.equal(product.title, "Organizador de cocina");
+  assert.deepEqual(product.categoryIds, ["601234"]);
+  assert.deepEqual(product.categoryNames, ["Organizadores de cocina"]);
+
+  const opportunityRecords = extractOpportunityRecords({
+    result: {
+      opportunityList: [
+        {
+          id: "row-wrapper-id",
+          opportunityId: "7345678901234567890",
+          opportunityName: "Organización del hogar",
+          opportunityType: "CATEGORY",
+          status: "ACTIVE",
+          category: { id: "601234", name: "Organizadores de cocina" },
+        },
+      ],
+    },
+  });
+  const opportunity = normalizeOpportunity(opportunityRecords[0]);
+  assert.equal(opportunity.id, "7345678901234567890");
+  assert.equal(opportunity.title, "Organización del hogar");
+  assert.equal(opportunity.type, "CATEGORY");
+});
+
 test("gives an exact category and brand match a high-confidence recommendation", () => {
   const product = normalizeProduct({
     id: "product-1",

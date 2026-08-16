@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   ImportIssue,
+  OpportunitySnapshot,
+  ProductSnapshot,
   TaskChannel,
   TaskRecord,
   TaskStatus,
@@ -56,20 +58,21 @@ export interface CompleteTaskInput {
   errorMessage?: string | null;
 }
 
-export interface CapturedProductInput {
-  id: string;
-  title: string;
-  status: string | null;
-  categoryName: string | null;
-  brandName: string | null;
-  price: number | null;
-  currency: string | null;
+export interface CapturedProductInput extends ProductSnapshot {
   stock: number | null;
 }
 
 export interface CapturedProduct extends CapturedProductInput {
   shopId: string;
-  categoryNames: string[];
+  sourceUrl: string;
+  capturedAt: string;
+  updatedAt: string;
+}
+
+export interface CapturedOpportunityInput extends OpportunitySnapshot {}
+
+export interface CapturedOpportunity extends CapturedOpportunityInput {
+  shopId: string;
   sourceUrl: string;
   capturedAt: string;
   updatedAt: string;
@@ -116,19 +119,60 @@ function shopPublicFromRow(row: SqlRow): ShopPublic {
   };
 }
 
+function stringArray(value: unknown, fallback: string[] = []): string[] {
+  if (typeof value !== "string") return fallback;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function capturedProductFromRow(row: SqlRow): CapturedProduct {
   const categoryName = row.category_name === null ? null : String(row.category_name);
+  const storedCategoryNames = stringArray(row.category_names_json);
   return {
     shopId: String(row.shop_id),
     id: String(row.product_id),
     title: String(row.title),
     status: row.status === null ? null : String(row.status),
-    categoryName,
-    categoryNames: categoryName ? [categoryName] : [],
+    categoryIds: stringArray(row.category_ids_json),
+    categoryNames:
+      storedCategoryNames.length > 0 ? storedCategoryNames : categoryName ? [categoryName] : [],
     brandName: row.brand_name === null ? null : String(row.brand_name),
+    keywords: stringArray(row.keywords_json),
+    attributes: stringArray(row.attributes_json),
     price: row.price === null ? null : Number(row.price),
     currency: row.currency === null ? null : String(row.currency),
     stock: row.stock === null ? null : Number(row.stock),
+    sourceUrl: String(row.source_url),
+    capturedAt: String(row.captured_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function capturedOpportunityFromRow(row: SqlRow): CapturedOpportunity {
+  return {
+    shopId: String(row.shop_id),
+    id: String(row.opportunity_id),
+    title: String(row.title),
+    type: String(row.type),
+    status: row.status === null ? null : String(row.status),
+    active: row.active === null ? null : Boolean(row.active),
+    expired: Boolean(row.expired),
+    fulfilled: Boolean(row.fulfilled),
+    categoryIds: stringArray(row.category_ids_json),
+    categoryNames: stringArray(row.category_names_json),
+    brandNames: stringArray(row.brand_names_json),
+    keywords: stringArray(row.keywords_json),
+    allowedProductStatuses: stringArray(row.allowed_product_statuses_json),
+    referencePrice: row.reference_price === null ? null : Number(row.reference_price),
+    minPrice: row.min_price === null ? null : Number(row.min_price),
+    maxPrice: row.max_price === null ? null : Number(row.max_price),
+    currency: row.currency === null ? null : String(row.currency),
     sourceUrl: String(row.source_url),
     capturedAt: String(row.captured_at),
     updatedAt: String(row.updated_at),
@@ -206,7 +250,11 @@ export class TibaoDatabase {
         title TEXT NOT NULL,
         status TEXT,
         category_name TEXT,
+        category_ids_json TEXT NOT NULL DEFAULT '[]',
+        category_names_json TEXT NOT NULL DEFAULT '[]',
         brand_name TEXT,
+        keywords_json TEXT NOT NULL DEFAULT '[]',
+        attributes_json TEXT NOT NULL DEFAULT '[]',
         price REAL,
         currency TEXT,
         stock INTEGER,
@@ -216,12 +264,54 @@ export class TibaoDatabase {
         PRIMARY KEY(shop_id, product_id)
       );
 
+      CREATE TABLE IF NOT EXISTS captured_opportunities (
+        shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        opportunity_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT,
+        active INTEGER,
+        expired INTEGER NOT NULL,
+        fulfilled INTEGER NOT NULL,
+        category_ids_json TEXT NOT NULL DEFAULT '[]',
+        category_names_json TEXT NOT NULL DEFAULT '[]',
+        brand_names_json TEXT NOT NULL DEFAULT '[]',
+        keywords_json TEXT NOT NULL DEFAULT '[]',
+        allowed_product_statuses_json TEXT NOT NULL DEFAULT '[]',
+        reference_price REAL,
+        min_price REAL,
+        max_price REAL,
+        currency TEXT,
+        source_url TEXT NOT NULL,
+        captured_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(shop_id, opportunity_id)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_batch_status ON tasks(batch_id, status);
       CREATE INDEX IF NOT EXISTS idx_tasks_channel_status ON tasks(channel, status, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(status, lease_expires_at);
       CREATE INDEX IF NOT EXISTS idx_captured_products_updated
         ON captured_products(shop_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_captured_opportunities_updated
+        ON captured_opportunities(shop_id, updated_at DESC);
     `);
+
+    const capturedProductColumns = new Set(
+      (this.raw.prepare("PRAGMA table_info(captured_products)").all() as SqlRow[]).map((row) =>
+        String(row.name),
+      ),
+    );
+    for (const [name, definition] of [
+      ["category_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["category_names_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["keywords_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["attributes_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ] as const) {
+      if (!capturedProductColumns.has(name)) {
+        this.raw.exec(`ALTER TABLE captured_products ADD COLUMN ${name} ${definition}`);
+      }
+    }
   }
 
   createShop(input: {
@@ -277,14 +367,19 @@ export class TibaoDatabase {
     const timestamp = nowIso();
     const statement = this.raw.prepare(`
       INSERT INTO captured_products (
-        shop_id, product_id, title, status, category_name, brand_name,
+        shop_id, product_id, title, status, category_name, category_ids_json,
+        category_names_json, brand_name, keywords_json, attributes_json,
         price, currency, stock, source_url, captured_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(shop_id, product_id) DO UPDATE SET
         title = excluded.title,
         status = excluded.status,
         category_name = excluded.category_name,
+        category_ids_json = excluded.category_ids_json,
+        category_names_json = excluded.category_names_json,
         brand_name = excluded.brand_name,
+        keywords_json = excluded.keywords_json,
+        attributes_json = excluded.attributes_json,
         price = excluded.price,
         currency = excluded.currency,
         stock = excluded.stock,
@@ -300,8 +395,12 @@ export class TibaoDatabase {
           product.id,
           product.title,
           product.status,
-          product.categoryName,
+          product.categoryNames.at(-1) ?? null,
+          JSON.stringify(product.categoryIds),
+          JSON.stringify(product.categoryNames),
           product.brandName,
+          JSON.stringify(product.keywords),
+          JSON.stringify(product.attributes),
           product.price,
           product.currency,
           product.stock,
@@ -319,14 +418,124 @@ export class TibaoDatabase {
     return { total: products.length, inserted: products.length - updated, updated };
   }
 
-  listCapturedProducts(shopId: string, limit = 200): CapturedProduct[] {
+  listCapturedProducts(shopId: string, limit = 200, offset = 0): CapturedProduct[] {
     return (
       this.raw
         .prepare(
-          "SELECT * FROM captured_products WHERE shop_id = ? ORDER BY updated_at DESC, product_id LIMIT ?",
+          `SELECT * FROM captured_products WHERE shop_id = ?
+           ORDER BY updated_at DESC, product_id LIMIT ? OFFSET ?`,
         )
-        .all(shopId, Math.min(Math.max(limit, 1), 5_000)) as SqlRow[]
+        .all(
+          shopId,
+          Math.min(Math.max(limit, 1), 5_000),
+          Math.min(Math.max(offset, 0), 1_000_000),
+        ) as SqlRow[]
     ).map(capturedProductFromRow);
+  }
+
+  getCapturedProducts(shopId: string, productIds: string[]): CapturedProduct[] {
+    const uniqueIds = [...new Set(productIds)].filter(Boolean);
+    if (uniqueIds.length === 0) return [];
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = this.raw
+      .prepare(
+        `SELECT * FROM captured_products WHERE shop_id = ? AND product_id IN (${placeholders})`,
+      )
+      .all(shopId, ...uniqueIds) as SqlRow[];
+    const byId = new Map(rows.map((row) => [String(row.product_id), capturedProductFromRow(row)]));
+    return uniqueIds.map((id) => byId.get(id)).filter((item): item is CapturedProduct => Boolean(item));
+  }
+
+  upsertCapturedOpportunities(input: {
+    shopId: string;
+    sourceUrl: string;
+    capturedAt: string;
+    opportunities: CapturedOpportunityInput[];
+  }): UpsertCapturedProductsResult {
+    const opportunities = [
+      ...new Map(input.opportunities.map((opportunity) => [opportunity.id, opportunity])).values(),
+    ];
+    if (opportunities.length === 0) return { total: 0, inserted: 0, updated: 0 };
+    const placeholders = opportunities.map(() => "?").join(", ");
+    const existingRows = this.raw
+      .prepare(
+        `SELECT opportunity_id FROM captured_opportunities
+         WHERE shop_id = ? AND opportunity_id IN (${placeholders})`,
+      )
+      .all(input.shopId, ...opportunities.map((opportunity) => opportunity.id)) as SqlRow[];
+    const existing = new Set(existingRows.map((row) => String(row.opportunity_id)));
+    const timestamp = nowIso();
+    const statement = this.raw.prepare(`
+      INSERT INTO captured_opportunities (
+        shop_id, opportunity_id, title, type, status, active, expired, fulfilled,
+        category_ids_json, category_names_json, brand_names_json, keywords_json,
+        allowed_product_statuses_json, reference_price, min_price, max_price,
+        currency, source_url, captured_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(shop_id, opportunity_id) DO UPDATE SET
+        title = excluded.title,
+        type = excluded.type,
+        status = excluded.status,
+        active = excluded.active,
+        expired = excluded.expired,
+        fulfilled = excluded.fulfilled,
+        category_ids_json = excluded.category_ids_json,
+        category_names_json = excluded.category_names_json,
+        brand_names_json = excluded.brand_names_json,
+        keywords_json = excluded.keywords_json,
+        allowed_product_statuses_json = excluded.allowed_product_statuses_json,
+        reference_price = excluded.reference_price,
+        min_price = excluded.min_price,
+        max_price = excluded.max_price,
+        currency = excluded.currency,
+        source_url = excluded.source_url,
+        captured_at = excluded.captured_at,
+        updated_at = excluded.updated_at
+    `);
+    this.raw.exec("BEGIN IMMEDIATE");
+    try {
+      for (const opportunity of opportunities) {
+        statement.run(
+          input.shopId,
+          opportunity.id,
+          opportunity.title,
+          opportunity.type,
+          opportunity.status,
+          opportunity.active === null ? null : Number(opportunity.active),
+          Number(opportunity.expired),
+          Number(opportunity.fulfilled),
+          JSON.stringify(opportunity.categoryIds),
+          JSON.stringify(opportunity.categoryNames),
+          JSON.stringify(opportunity.brandNames),
+          JSON.stringify(opportunity.keywords),
+          JSON.stringify(opportunity.allowedProductStatuses),
+          opportunity.referencePrice,
+          opportunity.minPrice,
+          opportunity.maxPrice,
+          opportunity.currency,
+          input.sourceUrl,
+          input.capturedAt,
+          timestamp,
+        );
+      }
+      this.raw.exec("COMMIT");
+    } catch (error) {
+      this.raw.exec("ROLLBACK");
+      throw error;
+    }
+    const updated = opportunities.filter((opportunity) => existing.has(opportunity.id)).length;
+    return { total: opportunities.length, inserted: opportunities.length - updated, updated };
+  }
+
+  listCapturedOpportunities(shopId: string, limit = 5_000): CapturedOpportunity[] {
+    return (
+      this.raw
+        .prepare(
+          `SELECT * FROM captured_opportunities WHERE shop_id = ?
+           ORDER BY updated_at DESC, opportunity_id LIMIT ?`,
+        )
+        .all(shopId, Math.min(Math.max(limit, 1), 10_000)) as SqlRow[]
+    ).map(capturedOpportunityFromRow);
   }
 
   createBatch(input: {

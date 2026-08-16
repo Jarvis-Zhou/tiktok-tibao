@@ -12,6 +12,7 @@ await build({
     popup: resolve(root, "src/popup.ts"),
     options: resolve(root, "src/options.ts"),
     content: resolve(root, "src/content.ts"),
+    "page-capture": resolve(root, "src/page-capture.ts"),
   },
   outdir: output,
   bundle: true,

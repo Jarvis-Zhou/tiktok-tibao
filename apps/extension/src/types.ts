@@ -1,3 +1,5 @@
+import type { OpportunitySnapshot, ProductSnapshot } from "@tibao/core";
+
 export interface ExtensionSettings {
   serverUrl: string;
   extensionKey: string;
@@ -43,16 +45,11 @@ export interface FillResult {
   message: string;
 }
 
-export interface CollectedProduct {
-  id: string;
-  title: string;
-  status: string | null;
-  categoryName: string | null;
-  brandName: string | null;
-  price: number | null;
-  currency: string | null;
+export interface CollectedProduct extends ProductSnapshot {
   stock: number | null;
 }
+
+export interface CollectedOpportunity extends OpportunitySnapshot {}
 
 export interface CollectProductsMessage {
   type: "TIBAO_COLLECT_PRODUCTS";
@@ -73,6 +70,8 @@ export interface CollectProductsResult {
   ok: boolean;
   message: string;
   products: CollectedProduct[];
+  opportunities: CollectedOpportunity[];
+  captureSource: "network" | "dom" | "none";
   sourceUrl: string;
   capturedAt: string;
   scannedRows: number;
@@ -82,6 +81,11 @@ export interface ProductImportResult {
   total: number;
   inserted: number;
   updated: number;
+}
+
+export interface SnapshotImportResult {
+  products: ProductImportResult;
+  opportunities: ProductImportResult;
 }
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {

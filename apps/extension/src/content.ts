@@ -1,10 +1,60 @@
 import type {
+  CollectedOpportunity,
   CollectedProduct,
   CollectProductsMessage,
   CollectProductsResult,
   FillMessage,
   FillResult,
 } from "./types.js";
+
+const PAGE_CAPTURE_SOURCE = "tibao-page-capture-v1";
+const capturedProducts = new Map<string, CollectedProduct>();
+const capturedOpportunities = new Map<string, CollectedOpportunity>();
+
+function snapshotQuality(value: object): number {
+  return Object.values(value).reduce((score, item) => {
+    if (Array.isArray(item)) return score + Math.min(item.length, 5);
+    return score + (item === null || item === "" ? 0 : 1);
+  }, 0);
+}
+
+function mergeSnapshot<T extends { id: string }>(target: Map<string, T>, value: T, limit: number): void {
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(value.id)) return;
+  const existing = target.get(value.id);
+  if (!existing || snapshotQuality(value) >= snapshotQuality(existing)) {
+    target.set(value.id, value);
+  }
+  if (target.size > limit) target.delete(target.keys().next().value as string);
+}
+
+window.addEventListener("message", (event: MessageEvent<unknown>) => {
+  if (event.source !== window || event.origin !== window.location.origin) return;
+  if (!event.data || typeof event.data !== "object") return;
+  const message = event.data as {
+    source?: unknown;
+    products?: unknown;
+    opportunities?: unknown;
+  };
+  if (message.source !== PAGE_CAPTURE_SOURCE) return;
+  if (Array.isArray(message.products)) {
+    for (const product of message.products) {
+      if (product && typeof product === "object" && typeof (product as { id?: unknown }).id === "string") {
+        mergeSnapshot(capturedProducts, product as CollectedProduct, 2_000);
+      }
+    }
+  }
+  if (Array.isArray(message.opportunities)) {
+    for (const opportunity of message.opportunities) {
+      if (
+        opportunity &&
+        typeof opportunity === "object" &&
+        typeof (opportunity as { id?: unknown }).id === "string"
+      ) {
+        mergeSnapshot(capturedOpportunities, opportunity as CollectedOpportunity, 2_000);
+      }
+    }
+  }
+});
 
 const DEFAULT_PRODUCT_ROW_SELECTORS = [
   "[data-product-id]",
@@ -170,8 +220,11 @@ function productFromRow(
     id,
     title: configuredTitle || fallbackTitle(row, id),
     status: status || null,
-    categoryName: categoryName || null,
+    categoryIds: [],
+    categoryNames: categoryName ? [categoryName] : [],
     brandName: brandName || null,
+    keywords: [],
+    attributes: [],
     price: parseLocaleNumber(priceText),
     currency: currencyFromText(priceText),
     stock: stockValue === null ? null : Math.floor(stockValue),
@@ -209,7 +262,7 @@ function collectRows(
   for (const row of rows.slice(0, 500)) {
     const product = productFromRow(row, profile);
     if (product && !products.has(product.id)) products.set(product.id, product);
-    if (products.size >= 200) break;
+    if (products.size >= 500) break;
   }
   return [...products.values()];
 }
@@ -222,6 +275,47 @@ function collectProducts(message: CollectProductsMessage): CollectProductsResult
       ok: false,
       message: invalidSelector,
       products: [],
+      opportunities: [],
+      captureSource: "none",
+      sourceUrl: location.href,
+      capturedAt,
+      scannedRows: 0,
+    };
+  }
+
+  const networkProducts = [...capturedProducts.values()];
+  const networkOpportunities = [...capturedOpportunities.values()];
+  if (networkProducts.length > 0 || networkOpportunities.length > 0) {
+    const parts = [
+      networkProducts.length > 0 ? `${networkProducts.length} 个商品` : "",
+      networkOpportunities.length > 0 ? `${networkOpportunities.length} 个机会` : "",
+    ].filter(Boolean);
+    return {
+      ok: true,
+      message: `已从 Seller Center 页面数据识别 ${parts.join("、")}`,
+      products: networkProducts,
+      opportunities: networkOpportunities,
+      captureSource: "network",
+      sourceUrl: location.href,
+      capturedAt,
+      scannedRows: 0,
+    };
+  }
+
+  const explicitSelectors = Object.values(message.profile).some((value) => Boolean(value));
+  const sellerCenter = /(^|\.)(tiktokshop|tiktokglobalshop)\.com$/i.test(location.hostname)
+    || [
+      "seller-mx.tiktok.com",
+      "seller.tiktokglobalshop.com",
+      "seller.tiktokshopglobalselling.com",
+    ].includes(location.hostname);
+  if (sellerCenter && !explicitSelectors) {
+    return {
+      ok: false,
+      message: "尚未捕获 Seller Center 页面数据。请刷新当前商品/机会页面，等待列表加载完成后再读取",
+      products: [],
+      opportunities: [],
+      captureSource: "none",
       sourceUrl: location.href,
       capturedAt,
       scannedRows: 0,
@@ -244,9 +338,11 @@ function collectProducts(message: CollectProductsMessage): CollectProductsResult
   return {
     ok: best.products.length > 0,
     message: best.products.length
-      ? `已从当前页识别 ${best.products.length} 个商品`
+      ? `已通过页面选择器识别 ${best.products.length} 个商品`
       : "当前页未识别到商品，请打开商品管理列表或配置采集选择器",
     products: best.products,
+    opportunities: [],
+    captureSource: best.products.length > 0 ? "dom" : "none",
     sourceUrl: location.href,
     capturedAt,
     scannedRows: best.scannedRows,

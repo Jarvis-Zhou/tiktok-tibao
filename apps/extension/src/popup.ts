@@ -1,11 +1,12 @@
 import {
   checkServer,
   claimTask,
-  importProducts as uploadProducts,
+  importSnapshots as uploadSnapshots,
   reportTask,
 } from "./local-api.js";
 import {
   loadSettings,
+  type CollectedOpportunity,
   type CollectedProduct,
   type CollectProductsMessage,
   type CollectProductsResult,
@@ -37,6 +38,7 @@ const autoSubmitNode = requiredElement("#auto-submit", HTMLInputElement);
 let currentTask: ExtensionTask | null = null;
 let currentCapture: {
   products: CollectedProduct[];
+  opportunities: CollectedOpportunity[];
   sourceUrl: string;
   capturedAt: string;
 } | null = null;
@@ -57,19 +59,32 @@ function status(message: string, error = false): void {
 
 function renderCapture(): void {
   const products = currentCapture?.products ?? [];
-  captureCountNode.textContent = `${products.length} 个`;
-  importProductsButton.disabled = products.length === 0;
-  if (products.length === 0) {
-    capturePreviewNode.innerHTML = '<p class="empty">请先打开 Seller Center 商品列表页</p>';
+  const opportunities = currentCapture?.opportunities ?? [];
+  captureCountNode.textContent = `商品 ${products.length} · 机会 ${opportunities.length}`;
+  importProductsButton.disabled = products.length === 0 && opportunities.length === 0;
+  if (products.length === 0 && opportunities.length === 0) {
+    capturePreviewNode.innerHTML = '<p class="empty">请先打开 Seller Center 商品或机会列表页</p>';
     return;
   }
-  capturePreviewNode.innerHTML = `<div class="capture-list">${products
+  const productPreview = products
     .slice(0, 5)
     .map(
       (product) =>
         `<div><strong>${escapeHtml(product.title || product.id)}</strong><code>${escapeHtml(product.id)}</code></div>`,
     )
-    .join("")}</div>${products.length > 5 ? `<p class="more">另有 ${products.length - 5} 个商品</p>` : ""}`;
+    .join("");
+  const opportunityPreview = opportunities
+    .slice(0, 3)
+    .map(
+      (opportunity) =>
+        `<div><strong>${escapeHtml(opportunity.title || opportunity.id)}</strong><code>机会 ${escapeHtml(opportunity.id)}</code></div>`,
+    )
+    .join("");
+  capturePreviewNode.innerHTML = `<div class="capture-list">${productPreview}${opportunityPreview}</div>${
+    products.length > 5 || opportunities.length > 3
+      ? `<p class="more">本次共识别商品 ${products.length} 个、机会 ${opportunities.length} 个</p>`
+      : ""
+  }`;
 }
 
 function renderTask(): void {
@@ -130,6 +145,7 @@ collectProductsButton.addEventListener("click", () => void (async () => {
     currentCapture = result.ok
       ? {
           products: result.products,
+          opportunities: result.opportunities,
           sourceUrl: result.sourceUrl,
           capturedAt: result.capturedAt,
         }
@@ -151,8 +167,10 @@ importProductsButton.addEventListener("click", () => void (async () => {
   try {
     const settings = await loadSettings();
     if (!settings.extensionKey) throw new Error("请先在设置页填写插件共享密钥");
-    const result = await uploadProducts(settings, currentCapture);
-    status(`导入完成：新增 ${result.inserted}，更新 ${result.updated}`);
+    const result = await uploadSnapshots(settings, currentCapture);
+    status(
+      `导入完成：商品新增 ${result.products.inserted}/更新 ${result.products.updated}；机会新增 ${result.opportunities.inserted}/更新 ${result.opportunities.updated}`,
+    );
   } catch (error) {
     status(error instanceof Error ? error.message : String(error), true);
   } finally {
