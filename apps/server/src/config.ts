@@ -1,7 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { config as loadDotEnv } from "dotenv";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+export function loadRootEnvironment(
+  environmentPath = resolve(repositoryRoot, ".env"),
+): void {
+  loadDotEnv({ path: environmentPath });
+}
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);

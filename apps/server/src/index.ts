@@ -1,14 +1,14 @@
-import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadRootEnvironment } from "./config.js";
 import { TibaoDatabase } from "./database.js";
 import { registerRoutes } from "./routes.js";
 import { ApiRunner } from "./runner.js";
 import { TokenVault } from "./token-vault.js";
 
+loadRootEnvironment();
 const config = loadConfig();
 const database = new TibaoDatabase(config.databasePath);
 const vault = new TokenVault(config.tokenEncryptionKey);
