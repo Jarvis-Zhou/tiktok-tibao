@@ -80,3 +80,39 @@ test("does not treat generic wrapper IDs as products outside a product response"
   );
   assert.deepEqual(snapshots, { products: [], opportunities: [] });
 });
+
+test("normalizes captured opportunity availability while preserving unknown states", () => {
+  const snapshots = extractPageSnapshots(
+    {
+      data: {
+        opportunityList: [
+          {
+            opportunityId: "opportunity-open-1",
+            opportunityName: "Cocina abierta",
+            opportunityType: "CATEGORY",
+            availabilityStatus: "OPPORTUNITY_STATUS_OPEN",
+            listingCriteria: { categoryIds: ["601234"] },
+          },
+          {
+            opportunityId: "opportunity-unknown-1",
+            opportunityName: "Cocina pendiente",
+            opportunityType: "CATEGORY",
+            opportunityState: "PENDING_VALIDATION",
+            listingCriteria: { categoryIds: ["601234"] },
+          },
+        ],
+      },
+    },
+    "https://seller.tiktokshopglobalselling.com/api/opportunity/list",
+  );
+
+  assert.equal(snapshots.opportunities.length, 2);
+  assert.equal(
+    snapshots.opportunities.find((item) => item.id === "opportunity-open-1")?.active,
+    true,
+  );
+  assert.equal(
+    snapshots.opportunities.find((item) => item.id === "opportunity-unknown-1")?.active,
+    null,
+  );
+});

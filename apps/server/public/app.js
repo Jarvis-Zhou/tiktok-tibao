@@ -293,6 +293,10 @@ function confidenceLabel(confidence) {
   return confidence === "high" ? "高" : confidence === "medium" ? "中" : "低";
 }
 
+function opportunityActiveLabel(active) {
+  return active === true ? "true" : active === false ? "false" : "unknown";
+}
+
 function isSelectableMatch(match) {
   return match?.eligible === true && match.recommended === true && match.confidence === "high";
 }
@@ -354,7 +358,10 @@ function renderMatchResults(result) {
       const blockerDetail = blockers.length > 0
         ? `<div class="match-blockers">拦截：${blockers.map(escapeHtml).join("；")}</div>`
         : "";
-      return `<tr><td><input type="checkbox" data-match-index="${index}" ${selectable ? "" : "disabled"} aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${selectable ? '<span class="recommendation">可提报</span>' : '<span class="reference-only">风险候选</span>'}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td>${blockerDetail}<div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`;
+      const opportunityDiagnostics = diagnosticMode
+        ? `<div class="match-diagnostics"><code>原始机会状态：${escapeHtml(match.opportunity.status || "未获取")} · active=${opportunityActiveLabel(match.opportunity.active)}</code><code>允许商品状态：${escapeHtml(match.opportunity.allowedProductStatuses?.join("、") || "未声明")}</code></div>`
+        : "";
+      return `<tr><td><input type="checkbox" data-match-index="${index}" ${selectable ? "" : "disabled"} aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code><code>商品状态：${escapeHtml(match.product.status || "未获取")}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${opportunityDiagnostics}${selectable ? '<span class="recommendation">可提报</span>' : '<span class="reference-only">风险候选</span>'}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td>${blockerDetail}<div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`;
     }).join("")
     : `<tr><td colspan="5" class="empty">${diagnosticMode ? "没有达到当前诊断最低得分的候选，可适当降低诊断分数继续排查。" : "没有通过安全复核的机会，可切换诊断模式查看被类目、品牌、状态、关键词、价格或规则完整性拦截的候选。"}</td></tr>`;
   const warnings = result.warnings || [];

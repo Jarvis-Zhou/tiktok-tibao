@@ -321,6 +321,75 @@ function isPastTimestamp(value: unknown, now: number): boolean {
   return milliseconds < now;
 }
 
+function normalizedStatusCode(value: string, prefixes: readonly string[]): string {
+  let normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+  for (const prefix of prefixes) {
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.slice(prefix.length);
+      break;
+    }
+  }
+  return normalized;
+}
+
+const opportunityStatusPrefixes = [
+  "OPPORTUNITY_STATUS_",
+  "OPPORTUNITY_STATE_",
+  "AVAILABILITY_STATUS_",
+  "OPPORTUNITY_",
+  "STATUS_",
+  "STATE_",
+] as const;
+
+const activeOpportunityStatuses = new Set([
+  "ACTIVATE",
+  "ACTIVATED",
+  "ACTIVE",
+  "AVAILABLE",
+  "ENABLED",
+  "IN_PROGRESS",
+  "LIVE",
+  "ONGOING",
+  "ONLINE",
+  "OPEN",
+  "OPEN_FOR_SUBMISSION",
+  "PUBLISHED",
+  "SUBMITTABLE",
+]);
+
+const inactiveOpportunityStatuses = new Set([
+  "ARCHIVED",
+  "CANCELED",
+  "CANCELLED",
+  "CLOSED",
+  "COMPLETED",
+  "DEACTIVATE",
+  "DEACTIVATED",
+  "DISABLED",
+  "ENDED",
+  "EXPIRED",
+  "FULFILLED",
+  "INACTIVE",
+  "OFFLINE",
+  "PAUSED",
+  "SUSPENDED",
+  "UNAVAILABLE",
+]);
+
+function opportunityActiveFromStatus(status: string | null): boolean | null {
+  if (!status) return null;
+  const normalized = normalizedStatusCode(status, opportunityStatusPrefixes);
+  if (activeOpportunityStatuses.has(normalized)) return true;
+  if (inactiveOpportunityStatuses.has(normalized)) return false;
+  return null;
+}
+
 export function extractProductRecords(value: unknown): UnknownRecord[] {
   return extractRecords(value, [
     "products",
@@ -403,16 +472,36 @@ export function normalizeOpportunity(
 ): OpportunitySnapshot {
   const opportunity = unwrap(value, ["opportunity"]);
   const categories = collectCategoryData(opportunity);
-  const status = firstText(opportunity, ["status", "opportunity_status", "opportunityStatus"]);
-  const normalizedStatus = status?.trim().toUpperCase() ?? "";
-  const explicitActive = firstBoolean(opportunity, ["is_active", "isActive", "active"]);
-  const active =
-    explicitActive ??
-    (["ACTIVE", "LIVE", "OPEN", "AVAILABLE"].includes(normalizedStatus)
-      ? true
-      : ["INACTIVE", "DISABLED", "CLOSED", "EXPIRED"].includes(normalizedStatus)
-        ? false
-        : null);
+  const status = firstText(opportunity, [
+    "status",
+    "opportunity_status",
+    "opportunityStatus",
+    "opportunity_state",
+    "opportunityState",
+    "availability_status",
+    "availabilityStatus",
+    "availability.status",
+    "state",
+  ]);
+  const normalizedStatus = status
+    ? normalizedStatusCode(status, opportunityStatusPrefixes)
+    : "";
+  const explicitActive = firstBoolean(opportunity, [
+    "is_active",
+    "isActive",
+    "active",
+    "is_available",
+    "isAvailable",
+    "availability.is_available",
+    "availability.isAvailable",
+    "can_submit",
+    "canSubmit",
+    "is_submittable",
+    "isSubmittable",
+    "is_open_for_submission",
+    "isOpenForSubmission",
+  ]);
+  const active = explicitActive ?? opportunityActiveFromStatus(status);
   const expiryValue =
     valueAt(opportunity, "expire_time") ??
     valueAt(opportunity, "expireTime") ??
@@ -424,7 +513,7 @@ export function normalizeOpportunity(
     valueAt(opportunity, "endTime");
   const expired =
     firstBoolean(opportunity, ["is_expired", "isExpired", "expired"]) === true ||
-    ["EXPIRED", "CLOSED"].includes(normalizedStatus) ||
+    ["EXPIRED", "CLOSED", "ENDED"].includes(normalizedStatus) ||
     isPastTimestamp(expiryValue, now);
   const fulfilled =
     firstBoolean(opportunity, ["is_fulfilled", "isFulfilled", "fulfilled"]) === true ||
@@ -544,16 +633,59 @@ function hasIntersection(left: string[], right: string[]): boolean {
 }
 
 function isExplicitlyInactive(status: string | null): boolean {
-  if (!status) return false;
-  return /^(INACTIVE|DEACTIVATE|DEACTIVATED|DRAFT|SUSPEND|SUSPENDED|FROZEN|FREEZE|DELETED|FAILED|REJECTED|OFFLINE)$/i.test(
-    status.trim(),
-  );
+  return status ? canonicalProductStatus(status) === "inactive" : false;
 }
 
 function isKnownActiveProductStatus(status: string): boolean {
-  return /^(ACTIVATE|ACTIVATED|ACTIVE|LIVE|ONLINE|PUBLISHED|FOR[_ -]?SALE|SELLING|EN[_ -]?VIVO|ACTIVO|已上架)$/i.test(
-    status.trim(),
-  );
+  return canonicalProductStatus(status) === "active";
+}
+
+const productStatusPrefixes = [
+  "PRODUCT_STATUS_",
+  "PRODUCT_STATE_",
+  "LISTING_STATUS_",
+  "ITEM_STATUS_",
+  "STATUS_",
+  "STATE_",
+] as const;
+
+const activeProductStatuses = new Set([
+  "ACTIVATE",
+  "ACTIVATED",
+  "ACTIVE",
+  "ACTIVO",
+  "AVAILABLE_FOR_SALE",
+  "EN_VIVO",
+  "FOR_SALE",
+  "LIVE",
+  "ONLINE",
+  "ON_SALE",
+  "PUBLISHED",
+  "SELLING",
+  "已上架",
+]);
+
+const inactiveProductStatuses = new Set([
+  "DEACTIVATE",
+  "DEACTIVATED",
+  "DELETED",
+  "DRAFT",
+  "FAILED",
+  "FREEZE",
+  "FROZEN",
+  "INACTIVE",
+  "NOT_FOR_SALE",
+  "OFFLINE",
+  "REJECTED",
+  "SUSPEND",
+  "SUSPENDED",
+]);
+
+function canonicalProductStatus(status: string): string {
+  const normalized = normalizedStatusCode(status, productStatusPrefixes);
+  if (activeProductStatuses.has(normalized)) return "active";
+  if (inactiveProductStatuses.has(normalized)) return "inactive";
+  return comparable(normalized);
 }
 
 function pricePoints(product: ProductSnapshot, opportunity: OpportunitySnapshot): number {
@@ -581,19 +713,20 @@ export function scoreOpportunityMatch(
   options: MatchScoreOptions = {},
 ): ProductOpportunityMatch {
   const blockers: string[] = [];
+  const inferredOpportunityActive = opportunity.active ?? opportunityActiveFromStatus(opportunity.status);
   if (!opportunity.requirementsVerified) {
     blockers.push("机会完整提报要求未获取，禁止自动提报");
   }
   if (!opportunity.type.trim()) blockers.push("机会类型未知，无法验证提报要求");
   if (opportunity.expired) blockers.push("机会已过期");
-  if (opportunity.active === false) blockers.push("机会未激活");
-  if (opportunity.active === null) blockers.push("机会状态未知，无法确认仍可提报");
+  if (inferredOpportunityActive === false) blockers.push("机会未激活");
+  if (inferredOpportunityActive === null) blockers.push("机会状态未知，无法确认仍可提报");
   if (opportunity.fulfilled) blockers.push("机会已完成");
   if (isExplicitlyInactive(product.status)) blockers.push(`商品状态不可提报：${product.status}`);
   if (options.priorSubmitted) blockers.push("该商品已提报过此机会");
 
-  const productStatus = product.status ? comparable(product.status) : "";
-  const allowedStatuses = opportunity.allowedProductStatuses.map(comparable);
+  const productStatus = product.status ? canonicalProductStatus(product.status) : "";
+  const allowedStatuses = opportunity.allowedProductStatuses.map(canonicalProductStatus);
   if (!productStatus) {
     blockers.push("商品状态未知，无法确认可提报");
   } else if (!isKnownActiveProductStatus(product.status ?? "") && !allowedStatuses.includes(productStatus)) {
@@ -603,7 +736,7 @@ export function scoreOpportunityMatch(
     if (!productStatus || !allowedStatuses.includes(productStatus)) {
       blockers.push(
         productStatus
-          ? `商品状态不符合机会要求：${product.status}`
+          ? `商品状态不符合机会要求：${product.status}（允许：${opportunity.allowedProductStatuses.join("、")}）`
           : "商品状态未知，无法验证机会要求",
       );
     }
@@ -719,7 +852,7 @@ export function scoreOpportunityMatch(
   score += priceScore;
   reasons.push(`价格带匹配 +${priceScore}`);
 
-  if (!opportunity.expired && opportunity.active === true && !opportunity.fulfilled) {
+  if (!opportunity.expired && inferredOpportunityActive === true && !opportunity.fulfilled) {
     score += 5;
     reasons.push("机会当前有效 +5");
   }
@@ -733,7 +866,10 @@ export function scoreOpportunityMatch(
     eligible && score >= MIN_SAFE_MATCH_SCORE ? "high" : eligible && score >= 60 ? "medium" : "low";
   return {
     product,
-    opportunity,
+    opportunity:
+      inferredOpportunityActive === opportunity.active
+        ? opportunity
+        : { ...opportunity, active: inferredOpportunityActive },
     score,
     confidence,
     eligible,

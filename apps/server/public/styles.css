@@ -84,6 +84,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .score.low { color: #5c6470; background: #edf1f4; }
 .match-reason { max-width: 390px; color: #475569; line-height: 1.55; }
 .match-blockers { margin-bottom: 5px; color: #982c31; font-weight: 700; }
+.match-diagnostics { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: #f5f7f9; }
+.match-diagnostics code { margin-top: 2px; overflow-wrap: anywhere; }
 .recommendation, .reference-only { display: inline-block; margin-top: 5px; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 800; }
 .recommendation { background: #d8f4e6; color: #12633b; }
 .reference-only { background: #edf1f4; color: #5c6470; }

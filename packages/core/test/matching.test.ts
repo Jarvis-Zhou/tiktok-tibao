@@ -140,6 +140,96 @@ test("gives an exact category and brand match a high-confidence recommendation",
   assert.ok(result.score >= 75);
 });
 
+test("treats unambiguous active product-status aliases as equivalent", () => {
+  const product = normalizeProduct({
+    id: "product-active",
+    title: "Organizador de cocina",
+    status: "PRODUCT_STATUS_ACTIVATE",
+    category: { id: "home", name: "Cocina" },
+  });
+
+  for (const allowedStatus of ["LIVE", "ONLINE", "PRODUCT_STATUS_PUBLISHED"]) {
+    const opportunity = normalizeOpportunity({
+      id: `opp-${allowedStatus}`,
+      title: "Organizador de cocina",
+      opportunity_type: "CATEGORY",
+      status: "OPPORTUNITY_STATUS_OPEN",
+      listing_criteria: {
+        category_ids: ["home"],
+        product_statuses: [allowedStatus],
+      },
+    });
+    const result = scoreOpportunityMatch(product, opportunity);
+    assert.equal(result.eligible, true, allowedStatus);
+    assert.equal(
+      result.blockers.some((blocker) => blocker.includes("商品状态不符合机会要求")),
+      false,
+      allowedStatus,
+    );
+  }
+
+  const legacySnapshot = normalizeOpportunity({
+    id: "opp-legacy",
+    title: "Organizador de cocina",
+    opportunity_type: "CATEGORY",
+    status: "OPPORTUNITY_STATUS_OPEN",
+    listing_criteria: { category_ids: ["home"], product_statuses: ["LIVE"] },
+  });
+  const legacyResult = scoreOpportunityMatch(product, { ...legacySnapshot, active: null });
+  assert.equal(legacyResult.eligible, true);
+  assert.equal(legacyResult.opportunity.active, true);
+  assert.equal(
+    legacyResult.blockers.includes("机会状态未知，无法确认仍可提报"),
+    false,
+  );
+
+  const inactiveResult = scoreOpportunityMatch(
+    { ...product, status: "OFFLINE" },
+    normalizeOpportunity({
+      id: "opp-offline",
+      title: "Organizador de cocina",
+      opportunity_type: "CATEGORY",
+      status: "ACTIVE",
+      listing_criteria: { category_ids: ["home"], product_statuses: ["OFFLINE"] },
+    }),
+  );
+  assert.equal(inactiveResult.eligible, false);
+  assert.ok(inactiveResult.blockers.includes("商品状态不可提报：OFFLINE"));
+
+  const mismatchResult = scoreOpportunityMatch(
+    product,
+    normalizeOpportunity({
+      id: "opp-draft-only",
+      title: "Organizador de cocina",
+      opportunity_type: "CATEGORY",
+      status: "ACTIVE",
+      listing_criteria: { category_ids: ["home"], product_statuses: ["DRAFT"] },
+    }),
+  );
+  assert.ok(
+    mismatchResult.blockers.includes(
+      "商品状态不符合机会要求：PRODUCT_STATUS_ACTIVATE（允许：DRAFT）",
+    ),
+  );
+});
+
+test("recognizes explicit opportunity state and availability fields without guessing unknown codes", () => {
+  const activePayloads = [
+    { opportunityState: "OPPORTUNITY_STATUS_ACTIVE" },
+    { availabilityStatus: "OPEN_FOR_SUBMISSION" },
+    { isAvailable: true },
+    { availability: { isAvailable: true } },
+    { canSubmit: true },
+  ];
+  for (const payload of activePayloads) {
+    assert.equal(normalizeOpportunity(payload).active, true, JSON.stringify(payload));
+  }
+
+  assert.equal(normalizeOpportunity({ isOpenForSubmission: false }).active, false);
+  assert.equal(normalizeOpportunity({ opportunityState: "PENDING_VALIDATION" }).active, null);
+  assert.equal(normalizeOpportunity({ opportunityStatus: 7 }).active, null);
+});
+
 test("hard-filters category, brand, expiry and prior-submission conflicts", () => {
   const product = normalizeProduct({
     id: "product-1",
