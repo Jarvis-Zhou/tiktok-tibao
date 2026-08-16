@@ -72,6 +72,13 @@ test("loads a selected product and returns explainable eligible matches", async 
                 status: "ACTIVE",
                 listing_criteria: { category_ids: ["11"], brand: { name: "Acme" } },
               },
+              {
+                opportunity_id: "opp-2",
+                title: "Organizadores de cocina",
+                opportunity_type: "CATEGORY",
+                status: "ACTIVE",
+                listing_criteria: { category_ids: ["99"] },
+              },
             ],
           },
         });
@@ -96,6 +103,21 @@ test("loads a selected product and returns explainable eligible matches", async 
           },
         });
       }
+      if (url.pathname.endsWith("/opportunities/opp-2")) {
+        return response({
+          opportunity: {
+            id: "opp-2",
+            title: "Organizadores de cocina",
+            opportunity_type: "CATEGORY",
+            status: "ACTIVE",
+            listing_criteria: {
+              category_ids: ["99"],
+              keywords: ["organizador", "cocina"],
+              product_statuses: ["ACTIVATE"],
+            },
+          },
+        });
+      }
       throw new Error(`Unexpected request: ${url.pathname}`);
     };
 
@@ -108,6 +130,16 @@ test("loads a selected product and returns explainable eligible matches", async 
     assert.equal(result.matches[0]?.eligible, true);
     assert.equal(result.matches[0]?.recommended, true);
     assert.ok((result.matches[0]?.reasons.length ?? 0) >= 3);
+    assert.equal(result.strategy.mode, "strict");
+
+    const diagnostic = await runner.matchProducts(shop.id, ["product-1"], {
+      mode: "diagnostic",
+      diagnosticMinimumScore: 0,
+    });
+    assert.equal(diagnostic.matches.length, 2);
+    assert.equal(diagnostic.matches[0]?.eligible, true);
+    assert.equal(diagnostic.matches[1]?.eligible, false);
+    assert.match(diagnostic.matches[1]?.blockers.join(" ") ?? "", /类目.*不匹配/);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

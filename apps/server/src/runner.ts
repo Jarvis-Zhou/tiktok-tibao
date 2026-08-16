@@ -82,6 +82,16 @@ export interface ProductPageResult {
   requestId: string | null;
 }
 
+export interface MatchStrategy {
+  mode: "strict" | "diagnostic";
+  diagnosticMinimumScore: number;
+}
+
+const DEFAULT_MATCH_STRATEGY: MatchStrategy = {
+  mode: "strict",
+  diagnosticMinimumScore: 40,
+};
+
 export interface ProductMatchResult {
   products: ProductSnapshot[];
   matches: ProductOpportunityMatch[];
@@ -89,6 +99,7 @@ export interface ProductMatchResult {
   candidatePairCount: number;
   blockedPairCount: number;
   warnings: string[];
+  strategy: MatchStrategy;
 }
 
 export interface MatchSelectionInput {
@@ -109,6 +120,20 @@ export interface CapturedTaskValidation {
 
 function matchPairKey(productId: string, opportunityId: string): string {
   return `${productId.trim().toLowerCase()}\u001f${opportunityId.trim().toLowerCase()}`;
+}
+
+function isSafeMatch(match: ProductOpportunityMatch): boolean {
+  return match.eligible && match.recommended && match.confidence === "high";
+}
+
+function includeMatch(match: ProductOpportunityMatch, strategy: MatchStrategy): boolean {
+  return isSafeMatch(match)
+    || (strategy.mode === "diagnostic" && match.score >= strategy.diagnosticMinimumScore);
+}
+
+function compareMatches(left: ProductOpportunityMatch, right: ProductOpportunityMatch): number {
+  const safetyDifference = Number(isSafeMatch(right)) - Number(isSafeMatch(left));
+  return safetyDifference || right.score - left.score;
 }
 
 export class ApiRunner {
@@ -164,7 +189,11 @@ export class ApiRunner {
     };
   }
 
-  async matchProducts(shopId: string, productIds: string[]): Promise<ProductMatchResult> {
+  async matchProducts(
+    shopId: string,
+    productIds: string[],
+    strategy: MatchStrategy = DEFAULT_MATCH_STRATEGY,
+  ): Promise<ProductMatchResult> {
     const uniqueProductIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
     if (uniqueProductIds.length === 0) throw new Error("至少选择一个商品");
     if (uniqueProductIds.length > 20) throw new Error("MVP 单次最多匹配 20 个商品");
@@ -292,10 +321,10 @@ export class ApiRunner {
         const match = scoreOpportunityMatch(product, opportunity, {
           priorSubmitted: priorByProduct.get(product.id)?.has(opportunityId) ?? false,
         });
-        if (match.eligible) productMatches.push(match);
-        else blockedPairCount += 1;
+        if (!match.eligible) blockedPairCount += 1;
+        if (includeMatch(match, strategy)) productMatches.push(match);
       }
-      productMatches.sort((left, right) => right.score - left.score);
+      productMatches.sort(compareMatches);
       matches.push(...productMatches.slice(0, 8));
     }
 
@@ -306,6 +335,7 @@ export class ApiRunner {
       candidatePairCount,
       blockedPairCount,
       warnings,
+      strategy,
     };
   }
 
@@ -390,7 +420,11 @@ export class ApiRunner {
     return { safe: true, message: "安全复核通过" };
   }
 
-  matchCapturedProducts(shopId: string, productIds: string[]): ProductMatchResult {
+  matchCapturedProducts(
+    shopId: string,
+    productIds: string[],
+    strategy: MatchStrategy = DEFAULT_MATCH_STRATEGY,
+  ): ProductMatchResult {
     const uniqueProductIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
     if (uniqueProductIds.length === 0) throw new Error("至少选择一个商品");
     if (uniqueProductIds.length > 20) throw new Error("MVP 单次最多匹配 20 个商品");
@@ -427,10 +461,10 @@ export class ApiRunner {
         const match = scoreOpportunityMatch(product, opportunity, {
           priorSubmitted: prior.has(opportunity.id),
         });
-        if (match.eligible) productMatches.push(match);
-        else blockedPairCount += 1;
+        if (!match.eligible) blockedPairCount += 1;
+        if (includeMatch(match, strategy)) productMatches.push(match);
       }
-      productMatches.sort((left, right) => right.score - left.score);
+      productMatches.sort(compareMatches);
       matches.push(...productMatches.slice(0, 8));
     }
 
@@ -441,6 +475,7 @@ export class ApiRunner {
       candidatePairCount,
       blockedPairCount,
       warnings,
+      strategy,
     };
   }
 

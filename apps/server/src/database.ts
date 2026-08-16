@@ -52,7 +52,9 @@ export interface TaskFilters {
 }
 
 export interface ProductSubmissionProgress {
-  state: "pending" | "in_submission";
+  state: "pending" | "matched" | "no_match" | "in_submission";
+  matchCount: number | null;
+  lastMatchedAt: string | null;
   taskCount: number;
   statusCounts: Partial<Record<TaskStatus, number>>;
   latestUpdatedAt: string | null;
@@ -253,6 +255,15 @@ export class TibaoDatabase {
         event TEXT NOT NULL,
         detail_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS product_match_progress (
+        shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        match_count INTEGER NOT NULL CHECK(match_count >= 0),
+        matched_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(shop_id, product_id)
       );
 
       CREATE TABLE IF NOT EXISTS oauth_states (
@@ -776,6 +787,43 @@ export class TibaoDatabase {
     return rows.map((row) => String(row.opportunity_id));
   }
 
+  recordProductMatchResults(
+    shopId: string,
+    results: Array<{ productId: string; matchCount: number }>,
+  ): void {
+    const normalized = new Map<string, number>();
+    for (const result of results) {
+      const productId = result.productId.trim();
+      if (!productId) continue;
+      if (!Number.isSafeInteger(result.matchCount) || result.matchCount < 0) {
+        throw new Error(`商品 ${productId} 的匹配结果数量无效`);
+      }
+      normalized.set(productId, result.matchCount);
+    }
+    if (normalized.size === 0) return;
+
+    const timestamp = nowIso();
+    const statement = this.raw.prepare(`
+      INSERT INTO product_match_progress (
+        shop_id, product_id, match_count, matched_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(shop_id, product_id) DO UPDATE SET
+        match_count = excluded.match_count,
+        matched_at = excluded.matched_at,
+        updated_at = excluded.updated_at
+    `);
+    this.raw.exec("BEGIN IMMEDIATE");
+    try {
+      for (const [productId, matchCount] of normalized) {
+        statement.run(shopId, productId, matchCount, timestamp, timestamp);
+      }
+      this.raw.exec("COMMIT");
+    } catch (error) {
+      this.raw.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   productSubmissionProgress(
     shopId: string,
     productIds: string[],
@@ -784,13 +832,36 @@ export class TibaoDatabase {
     const progress = new Map<string, ProductSubmissionProgress>(
       uniqueIds.map((productId) => [
         productId,
-        { state: "pending", taskCount: 0, statusCounts: {}, latestUpdatedAt: null },
+        {
+          state: "pending",
+          matchCount: null,
+          lastMatchedAt: null,
+          taskCount: 0,
+          statusCounts: {},
+          latestUpdatedAt: null,
+        },
       ]),
     );
     if (uniqueIds.length === 0) return progress;
 
     const placeholders = uniqueIds.map(() => "?").join(", ");
-    const rows = this.raw
+    const matchRows = this.raw
+      .prepare(
+        `SELECT product_id, match_count, matched_at
+         FROM product_match_progress
+         WHERE shop_id = ? AND product_id IN (${placeholders})`,
+      )
+      .all(shopId, ...uniqueIds) as SqlRow[];
+    for (const row of matchRows) {
+      const current = progress.get(String(row.product_id));
+      if (!current) continue;
+      current.matchCount = Number(row.match_count);
+      current.lastMatchedAt = String(row.matched_at);
+      current.latestUpdatedAt = current.lastMatchedAt;
+      current.state = current.matchCount > 0 ? "matched" : "no_match";
+    }
+
+    const taskRows = this.raw
       .prepare(
         `SELECT product_id, status, COUNT(*) AS task_count, MAX(updated_at) AS latest_updated_at
          FROM tasks
@@ -798,7 +869,7 @@ export class TibaoDatabase {
          GROUP BY product_id, status`,
       )
       .all(shopId, ...uniqueIds) as SqlRow[];
-    for (const row of rows) {
+    for (const row of taskRows) {
       const productId = String(row.product_id);
       const status = String(row.status) as TaskStatus;
       const count = Number(row.task_count);

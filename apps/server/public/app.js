@@ -181,7 +181,18 @@ function renderProductSelectionSummary() {
 }
 
 function productProgressState(product) {
-  return product.submissionProgress?.state === "in_submission" ? "in_submission" : "pending";
+  const state = product.submissionProgress?.state;
+  return ["matched", "no_match", "in_submission"].includes(state) ? state : "pending";
+}
+
+function productProgressMeta(product) {
+  const state = productProgressState(product);
+  return {
+    pending: { label: "待匹配提报", className: "pending" },
+    matched: { label: "已匹配待提报", className: "matched" },
+    no_match: { label: "已匹配无结果", className: "no-match" },
+    in_submission: { label: "已进入提报", className: "in-submission" },
+  }[state];
 }
 
 function visibleProducts() {
@@ -195,10 +206,10 @@ function visibleProducts() {
 }
 
 function renderProductProgressSummary() {
-  const pending = state.products.filter((product) => productProgressState(product) === "pending").length;
-  const inSubmission = state.products.length - pending;
+  const counts = { pending: 0, matched: 0, no_match: 0, in_submission: 0 };
+  for (const product of state.products) counts[productProgressState(product)] += 1;
   $("#product-progress-summary").textContent = state.products.length
-    ? `已加载 ${state.products.length} 个：待匹配提报 ${pending} · 已进入提报 ${inSubmission}${state.nextProductPageToken ? " · 还有下一页" : ""}`
+    ? `已加载 ${state.products.length} 个：待匹配 ${counts.pending} · 待提报 ${counts.matched} · 无结果 ${counts.no_match} · 已进入提报 ${counts.in_submission}${state.nextProductPageToken ? " · 还有下一页" : ""}`
     : "读取商品后会根据本地提报台账显示进度。";
 }
 
@@ -208,11 +219,17 @@ function renderProducts() {
     ? products.map((product) => {
       const category = product.categoryNames.at(-1) || product.categoryIds.at(-1) || "—";
       const progress = product.submissionProgress;
-      const inSubmission = productProgressState(product) === "in_submission";
-      const progressDetail = inSubmission
-        ? `${progress?.taskCount || 0} 条任务 · ${countLabel(progress?.statusCounts)}`
-        : "尚未创建提报任务";
-      return `<tr><td><input type="checkbox" data-product-id="${escapeHtml(product.id)}" ${state.selectedProductIds.has(product.id) ? "checked" : ""} aria-label="选择 ${escapeHtml(product.title)}" /></td><td><strong>${escapeHtml(product.title || product.id)}</strong><code>${escapeHtml(product.id)}</code></td><td>${escapeHtml(category)}<code>${escapeHtml(product.brandName || "无品牌信息")}</code></td><td>${escapeHtml(product.status || "未知")}</td><td>${escapeHtml(formatPrice(product))}</td><td><span class="submission-progress ${inSubmission ? "in-submission" : "pending"}">${inSubmission ? "已进入提报" : "待匹配提报"}</span><code>${escapeHtml(progressDetail)}</code></td></tr>`;
+      const progressState = productProgressState(product);
+      const progressMeta = productProgressMeta(product);
+      let progressDetail = "尚未执行机会匹配";
+      if (progressState === "matched") {
+        progressDetail = `${progress?.matchCount || 0} 个可提报结果${progress?.lastMatchedAt ? ` · ${formatTime(progress.lastMatchedAt)}` : ""}`;
+      } else if (progressState === "no_match") {
+        progressDetail = `本次没有可提报结果${progress?.lastMatchedAt ? ` · ${formatTime(progress.lastMatchedAt)}` : ""}`;
+      } else if (progressState === "in_submission") {
+        progressDetail = `${progress?.taskCount || 0} 条任务 · ${countLabel(progress?.statusCounts)}`;
+      }
+      return `<tr><td><input type="checkbox" data-product-id="${escapeHtml(product.id)}" ${state.selectedProductIds.has(product.id) ? "checked" : ""} aria-label="选择 ${escapeHtml(product.title)}" /></td><td><strong>${escapeHtml(product.title || product.id)}</strong><code>${escapeHtml(product.id)}</code></td><td>${escapeHtml(category)}<code>${escapeHtml(product.brandName || "无品牌信息")}</code></td><td>${escapeHtml(product.status || "未知")}</td><td>${escapeHtml(formatPrice(product))}</td><td><span class="submission-progress ${progressMeta.className}">${progressMeta.label}</span><code>${escapeHtml(progressDetail)}</code></td></tr>`;
     }).join("")
     : '<tr><td colspan="6" class="empty">当前筛选下没有商品；可调整筛选或直接填写 Product ID</td></tr>';
   const selectedVisibleCount = products.filter((product) => state.selectedProductIds.has(product.id)).length;
@@ -280,6 +297,24 @@ function isSelectableMatch(match) {
   return match?.eligible === true && match.recommended === true && match.confidence === "high";
 }
 
+function selectedMatchStrategy() {
+  const mode = $("#match-strategy").value;
+  if (mode === "strict") return { mode, diagnosticMinimumScore: 40 };
+  const diagnosticMinimumScore = Number($("#diagnostic-min-score").value);
+  if (!Number.isSafeInteger(diagnosticMinimumScore) || diagnosticMinimumScore < 0 || diagnosticMinimumScore > 100) {
+    throw new Error("诊断候选最低得分必须是 0 到 100 的整数");
+  }
+  return { mode: "diagnostic", diagnosticMinimumScore };
+}
+
+function updateMatchStrategyControls() {
+  const diagnostic = $("#match-strategy").value === "diagnostic";
+  $("#diagnostic-score-field").hidden = !diagnostic;
+  $("#match-strategy-hint").textContent = diagnostic
+    ? "诊断模式会额外展示达到最低得分的被拦截候选及原因；风险候选不能勾选或提报。"
+    : "严格模式只返回完整规则复核通过且得分不低于 75 的结果。";
+}
+
 function syncMatchSelectionState() {
   const checkboxes = [...document.querySelectorAll("[data-match-index]:not(:disabled)")];
   const selectedCount = checkboxes.filter((input) => input.checked).length;
@@ -293,6 +328,11 @@ function syncMatchSelectionState() {
 
 function renderMatchResults(result) {
   state.matches = result.matches || [];
+  state.products = state.products.map((product) => {
+    const submissionProgress = result.productProgress?.[product.id];
+    return submissionProgress ? { ...product, submissionProgress } : product;
+  });
+  renderProducts();
   if (result.source === "extension") {
     $("#match-channel").value = "extension";
     $("#run-matched-api").checked = false;
@@ -304,13 +344,19 @@ function renderMatchResults(result) {
   $("#match-results").hidden = false;
   const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
   const selectableCount = state.matches.filter(isSelectableMatch).length;
-  $("#match-summary").textContent = `${sourceLabel}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，安全拦截 ${result.blockedPairCount} 个，剩余 ${selectableCount} 个高置信度可提报结果。`;
+  const diagnosticCount = state.matches.length - selectableCount;
+  const diagnosticMode = result.strategy?.mode === "diagnostic";
+  $("#match-summary").textContent = `${sourceLabel} · ${diagnosticMode ? "诊断模式" : "严格模式"}：已读取 ${result.products.length} 个商品、${result.opportunityCount} 个机会；评估 ${result.candidatePairCount} 个组合，安全拦截 ${result.blockedPairCount} 个，剩余 ${selectableCount} 个高置信度可提报结果${diagnosticMode ? `，另展示 ${diagnosticCount} 个风险候选` : ""}。`;
   $("#match-rows").innerHTML = state.matches.length
     ? state.matches.map((match, index) => {
       const selectable = isSelectableMatch(match);
-      return `<tr><td><input type="checkbox" data-match-index="${index}" ${selectable ? "" : "disabled"} aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${selectable ? '<span class="recommendation">可提报</span>' : '<span class="reference-only">仅供参考</span>'}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td><div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`;
+      const blockers = Array.isArray(match.blockers) ? match.blockers : [];
+      const blockerDetail = blockers.length > 0
+        ? `<div class="match-blockers">拦截：${blockers.map(escapeHtml).join("；")}</div>`
+        : "";
+      return `<tr><td><input type="checkbox" data-match-index="${index}" ${selectable ? "" : "disabled"} aria-label="选择商品 ${escapeHtml(match.product.id)} 与机会 ${escapeHtml(match.opportunity.id)}" /></td><td><strong>${escapeHtml(match.product.title || match.product.id)}</strong><code>${escapeHtml(match.product.id)}</code></td><td><strong>${escapeHtml(match.opportunity.title || match.opportunity.id)}</strong><code>${escapeHtml(match.opportunity.type)} · ${escapeHtml(match.opportunity.id)}</code>${selectable ? '<span class="recommendation">可提报</span>' : '<span class="reference-only">风险候选</span>'}</td><td><span class="score ${match.confidence}">${match.score}</span><code>${confidenceLabel(match.confidence)}置信度</code></td><td>${blockerDetail}<div class="match-reason">${match.reasons.map(escapeHtml).join(" · ")}</div></td></tr>`;
     }).join("")
-    : '<tr><td colspan="5" class="empty">没有通过安全复核的机会，请检查完整提报规则、类目、品牌、状态、关键词和价格。</td></tr>';
+    : `<tr><td colspan="5" class="empty">${diagnosticMode ? "没有达到当前诊断最低得分的候选，可适当降低诊断分数继续排查。" : "没有通过安全复核的机会，可切换诊断模式查看被类目、品牌、状态、关键词、价格或规则完整性拦截的候选。"}</td></tr>`;
   const warnings = result.warnings || [];
   $("#match-warnings").hidden = warnings.length === 0;
   $("#match-warnings").innerHTML = warnings.map((warning) => `<div>• ${escapeHtml(warning)}</div>`).join("");
@@ -329,13 +375,16 @@ async function matchSelectedProducts() {
   $("#match-progress").hidden = false;
   $("#match-progress").textContent = `正在读取 ${productIds.length} 个商品详情、候选机会和历史提报记录，请勿重复点击…`;
   try {
+    const strategy = selectedMatchStrategy();
     const result = await api("/api/opportunity-matches", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ shopId, productIds, source: state.productSource || "auto" }),
+      body: JSON.stringify({ shopId, productIds, source: state.productSource || "auto", strategy }),
     });
     renderMatchResults(result);
-    toast(`匹配完成：返回 ${result.matches.length} 个可选组合`);
+    const selectableCount = result.matches.filter(isSelectableMatch).length;
+    const diagnosticCount = result.matches.length - selectableCount;
+    toast(`匹配完成：${selectableCount} 个可提报结果${strategy.mode === "diagnostic" ? `，${diagnosticCount} 个风险候选` : ""}`);
   } finally {
     $("#match-progress").hidden = true;
   }
@@ -413,6 +462,7 @@ $("#import-form").addEventListener("submit", async (event) => {
 
 $("#product-filter").addEventListener("input", renderProducts);
 $("#product-progress-filter").addEventListener("change", renderProducts);
+$("#match-strategy").addEventListener("change", updateMatchStrategyControls);
 $("#manual-product-ids").addEventListener("input", renderProductSelectionSummary);
 $("#product-select-all").addEventListener("change", (event) => {
   const products = visibleProducts();
@@ -547,6 +597,7 @@ $("#status-filter").innerHTML += [
 ].map((status) => `<option value="${status}">${status}</option>`).join("");
 $("#status-filter").addEventListener("change", loadTasks);
 
+updateMatchStrategyControls();
 refresh()
   .then(showOAuthResult)
   .catch((error) => toast(error.message, true));

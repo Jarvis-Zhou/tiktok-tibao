@@ -68,6 +68,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .product-table { min-width: 760px; }
 .product-table input, .match-table input, .inline-check input { width: auto; }
 .product-table td:first-child, .product-table th:first-child, .match-table td:first-child, .match-table th:first-child { width: 54px; text-align: center; }
+.match-strategy-bar { display: grid; grid-template-columns: minmax(240px, 320px) minmax(180px, 220px) 1fr; gap: 12px; align-items: end; margin-top: 14px; padding: 12px; border: 1px solid #b8ddd9; border-radius: 10px; background: #effaf8; }
+.match-strategy-bar .hint { align-self: center; margin: 0; }
 .match-action-row, .match-result-head, .result-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .match-action-row { margin-top: 14px; }
 .match-action-row .hint { margin: 0; }
@@ -81,11 +83,14 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .score.medium { color: #845500; background: #fff0ce; }
 .score.low { color: #5c6470; background: #edf1f4; }
 .match-reason { max-width: 390px; color: #475569; line-height: 1.55; }
+.match-blockers { margin-bottom: 5px; color: #982c31; font-weight: 700; }
 .recommendation, .reference-only { display: inline-block; margin-top: 5px; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 800; }
 .recommendation { background: #d8f4e6; color: #12633b; }
 .reference-only { background: #edf1f4; color: #5c6470; }
 .submission-progress { display: inline-block; padding: 4px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .submission-progress.pending { color: #845500; background: #fff0ce; }
+.submission-progress.matched { color: #12633b; background: #d8f4e6; }
+.submission-progress.no-match { color: #5c6470; background: #edf1f4; }
 .submission-progress.in-submission { color: #285c9a; background: #dcecff; }
 .warning-list { margin-top: 14px; padding: 12px 14px; border: 1px solid #f0cf96; border-radius: 9px; color: #7a4e00; background: #fff9ec; font-size: 12px; line-height: 1.6; }
 .result-controls { justify-content: flex-end; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -117,7 +122,7 @@ td code { display: block; color: #475569; font-size: 11px; margin-top: 4px; }
   .grid.two { grid-template-columns: 1fr; }
   .hero, .extension-note, .task-title, .match-action-row, .match-result-head, .result-controls { align-items: flex-start; flex-direction: column; }
   .shop-layout { grid-template-columns: 1fr; }
-  .match-controls, .product-progress-bar { grid-template-columns: 1fr; }
+  .match-controls, .product-progress-bar, .match-strategy-bar { grid-template-columns: 1fr; }
   .flow { white-space: normal; flex-wrap: wrap; }
   .topbar { align-items: flex-start; gap: 16px; flex-direction: column; }
   .toolbar { flex-wrap: wrap; }

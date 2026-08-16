@@ -72,6 +72,8 @@
             <select id="product-progress-filter">
               <option value="all">全部商品</option>
               <option value="pending">待匹配提报</option>
+              <option value="matched">已匹配待提报</option>
+              <option value="no_match">已匹配无结果</option>
               <option value="in_submission">已进入提报</option>
             </select>
           </label>
@@ -86,6 +88,18 @@
             <thead><tr><th><input id="product-select-all" type="checkbox" aria-label="选择当前筛选商品，最多 20 个" /></th><th>商品</th><th>类目 / 品牌</th><th>状态</th><th>价格</th><th>提报进度</th></tr></thead>
             <tbody id="product-rows"><tr><td colspan="6" class="empty">点击“读取店铺商品”，或直接填写 Product ID</td></tr></tbody>
           </table>
+        </div>
+        <div class="match-strategy-bar">
+          <label>匹配结果策略
+            <select id="match-strategy">
+              <option value="strict">严格 · 只显示可提报结果</option>
+              <option value="diagnostic">诊断 · 同时显示被拦截候选</option>
+            </select>
+          </label>
+          <label id="diagnostic-score-field" hidden>诊断候选最低得分
+            <input id="diagnostic-min-score" type="number" min="0" max="100" step="1" value="40" />
+          </label>
+          <p id="match-strategy-hint" class="hint">严格模式只返回完整规则复核通过且得分不低于 75 的结果。</p>
         </div>
         <div class="match-action-row">
           <p id="product-selection-summary" class="hint">尚未选择商品。</p>

@@ -347,6 +347,8 @@ test("imports extension-captured products with shared-key authentication", async
     assert.equal(listed.json().products[0].stock, 48);
     assert.deepEqual(listed.json().products[0].submissionProgress, {
       state: "pending",
+      matchCount: null,
+      lastMatchedAt: null,
       taskCount: 0,
       statusCounts: {},
       latestUpdatedAt: null,
@@ -436,6 +438,13 @@ test("imports extension snapshots, paginates all products and matches without AP
       id: `product-${String(index).padStart(4, "0")}`,
       title: `Producto ${index}`,
     }));
+    const unmatchedProduct = {
+      ...mainProduct,
+      id: "unmatched-product",
+      title: "Producto sin oportunidad",
+      categoryIds: ["999999"],
+      categoryNames: ["Sin coincidencia"],
+    };
     const imported = await app.inject({
       method: "POST",
       url: "/api/extension/snapshots/import",
@@ -444,7 +453,7 @@ test("imports extension snapshots, paginates all products and matches without AP
         shopId: shop.id,
         sourceUrl: "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MX",
         capturedAt: "2026-08-16T08:00:00.000Z",
-        products: [mainProduct, ...extraProducts],
+        products: [mainProduct, ...extraProducts, unmatchedProduct],
         opportunities: [
           {
             id: "7345678901234567890",
@@ -488,7 +497,7 @@ test("imports extension snapshots, paginates all products and matches without AP
     });
     assert.equal(imported.statusCode, 201);
     assert.deepEqual(imported.json().result, {
-      products: { total: 106, inserted: 106, updated: 0 },
+      products: { total: 107, inserted: 107, updated: 0 },
       opportunities: { total: 2, inserted: 2, updated: 0 },
     });
 
@@ -509,7 +518,7 @@ test("imports extension snapshots, paginates all products and matches without AP
       method: "GET",
       url: `/api/shops/${shop.id}/products?pageSize=50&pageToken=100&source=extension`,
     });
-    assert.equal(thirdPage.json().products.length, 6);
+    assert.equal(thirdPage.json().products.length, 7);
     assert.equal(thirdPage.json().nextPageToken, null);
 
     const matched = await app.inject({
@@ -528,6 +537,91 @@ test("imports extension snapshots, paginates all products and matches without AP
     assert.equal(matched.json().matches.length, 1);
     assert.equal(matched.json().matches[0].opportunity.id, "7345678901234567890");
     assert.equal(matched.json().matches[0].eligible, true);
+    assert.deepEqual(matched.json().strategy, {
+      mode: "strict",
+      diagnosticMinimumScore: 40,
+    });
+    assert.equal(matched.json().productProgress[mainProduct.id].state, "matched");
+    assert.equal(matched.json().productProgress[mainProduct.id].matchCount, 1);
+
+    const diagnosticMatch = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches",
+      payload: {
+        shopId: shop.id,
+        productIds: [mainProduct.id],
+        source: "extension",
+        strategy: { mode: "diagnostic", diagnosticMinimumScore: 0 },
+      },
+    });
+    assert.equal(diagnosticMatch.statusCode, 200);
+    assert.equal(diagnosticMatch.json().matches.length, 2);
+    assert.equal(diagnosticMatch.json().matches.filter((match: { eligible: boolean }) => match.eligible).length, 1);
+    assert.ok(
+      diagnosticMatch
+        .json()
+        .matches.some((match: { eligible: boolean; blockers: string[] }) =>
+          !match.eligible && match.blockers.length > 0),
+    );
+    assert.equal(diagnosticMatch.json().productProgress[mainProduct.id].state, "matched");
+    assert.equal(diagnosticMatch.json().productProgress[mainProduct.id].matchCount, 1);
+
+    const noMatch = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches",
+      payload: {
+        shopId: shop.id,
+        productIds: [unmatchedProduct.id],
+        source: "extension",
+      },
+    });
+    assert.equal(noMatch.statusCode, 200);
+    assert.equal(noMatch.json().matches.length, 0);
+    assert.equal(noMatch.json().productProgress[unmatchedProduct.id].state, "no_match");
+    assert.equal(noMatch.json().productProgress[unmatchedProduct.id].matchCount, 0);
+
+    const diagnosticNoMatch = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches",
+      payload: {
+        shopId: shop.id,
+        productIds: [unmatchedProduct.id],
+        source: "extension",
+        strategy: { mode: "diagnostic", diagnosticMinimumScore: 0 },
+      },
+    });
+    assert.equal(diagnosticNoMatch.statusCode, 200);
+    assert.equal(diagnosticNoMatch.json().matches.length, 2);
+    assert.ok(
+      diagnosticNoMatch
+        .json()
+        .matches.every((match: { eligible: boolean; blockers: string[] }) =>
+          !match.eligible && match.blockers.length > 0),
+    );
+    assert.equal(diagnosticNoMatch.json().productProgress[unmatchedProduct.id].state, "no_match");
+    assert.equal(diagnosticNoMatch.json().productProgress[unmatchedProduct.id].matchCount, 0);
+
+    const invalidStrategy = await app.inject({
+      method: "POST",
+      url: "/api/opportunity-matches",
+      payload: {
+        shopId: shop.id,
+        productIds: [unmatchedProduct.id],
+        source: "extension",
+        strategy: { mode: "diagnostic", diagnosticMinimumScore: 101 },
+      },
+    });
+    assert.equal(invalidStrategy.statusCode, 400);
+    assert.match(invalidStrategy.json().error, /0 到 100/);
+
+    const refreshedThirdPage = await app.inject({
+      method: "GET",
+      url: `/api/shops/${shop.id}/products?pageSize=50&pageToken=100&source=extension`,
+    });
+    const persistedNoMatch = refreshedThirdPage
+      .json()
+      .products.find((product: { id: string }) => product.id === unmatchedProduct.id);
+    assert.equal(persistedNoMatch.submissionProgress.state, "no_match");
 
     const unsafeBatch = await app.inject({
       method: "POST",

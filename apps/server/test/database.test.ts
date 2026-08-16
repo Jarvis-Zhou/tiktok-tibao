@@ -57,10 +57,30 @@ test("encrypts tokens and persists a deduplicated task queue", () => {
     assert.ok(initialProgress.get("product-1")?.latestUpdatedAt);
     assert.deepEqual(initialProgress.get("product-2"), {
       state: "pending",
+      matchCount: null,
+      lastMatchedAt: null,
       taskCount: 0,
       statusCounts: {},
       latestUpdatedAt: null,
     });
+
+    database.recordProductMatchResults(shop.id, [
+      { productId: "product-1", matchCount: 0 },
+      { productId: "product-2", matchCount: 0 },
+      { productId: "product-3", matchCount: 2 },
+    ]);
+    const matchedProgress = database.productSubmissionProgress(shop.id, [
+      "product-1",
+      "product-2",
+      "product-3",
+    ]);
+    assert.equal(matchedProgress.get("product-1")?.state, "in_submission");
+    assert.equal(matchedProgress.get("product-1")?.matchCount, 0);
+    assert.equal(matchedProgress.get("product-2")?.state, "no_match");
+    assert.equal(matchedProgress.get("product-2")?.matchCount, 0);
+    assert.ok(matchedProgress.get("product-2")?.lastMatchedAt);
+    assert.equal(matchedProgress.get("product-3")?.state, "matched");
+    assert.equal(matchedProgress.get("product-3")?.matchCount, 2);
 
     const duplicate = database.createBatch({
       filename: "duplicate.csv",

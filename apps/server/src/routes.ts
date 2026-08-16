@@ -22,7 +22,7 @@ import type {
   ProductSubmissionProgress,
   TibaoDatabase,
 } from "./database.js";
-import type { ApiRunner } from "./runner.js";
+import type { ApiRunner, MatchStrategy, ProductMatchResult } from "./runner.js";
 import type { TokenVault } from "./token-vault.js";
 
 export interface RouteDependencies {
@@ -41,6 +41,26 @@ export interface TikTokOAuthClient {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseMatchStrategy(value: unknown): MatchStrategy {
+  if (value === undefined) {
+    return { mode: "strict", diagnosticMinimumScore: 40 };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("匹配策略格式无效");
+  }
+  const input = value as Record<string, unknown>;
+  const mode = text(input.mode) || "strict";
+  if (!(["strict", "diagnostic"] as const).includes(mode as MatchStrategy["mode"])) {
+    throw new Error("匹配策略仅支持 strict 或 diagnostic");
+  }
+  const rawScore = input.diagnosticMinimumScore;
+  const diagnosticMinimumScore = rawScore === undefined || rawScore === "" ? 40 : Number(rawScore);
+  if (!Number.isSafeInteger(diagnosticMinimumScore) || diagnosticMinimumScore < 0 || diagnosticMinimumScore > 100) {
+    throw new Error("诊断候选最低得分必须是 0 到 100 的整数");
+  }
+  return { mode: mode as MatchStrategy["mode"], diagnosticMinimumScore };
 }
 
 function normalizeRegion(value: unknown): string {
@@ -239,11 +259,31 @@ function withSubmissionProgress<T extends { id: string }>(
     ...product,
     submissionProgress: progress.get(product.id) ?? {
       state: "pending",
+      matchCount: null,
+      lastMatchedAt: null,
       taskCount: 0,
       statusCounts: {},
       latestUpdatedAt: null,
     },
   }));
+}
+
+function recordMatchProgress(
+  database: TibaoDatabase,
+  shopId: string,
+  result: Pick<ProductMatchResult, "products" | "matches">,
+): Record<string, ProductSubmissionProgress> {
+  const matchCounts = new Map(result.products.map((product) => [product.id, 0]));
+  for (const match of result.matches) {
+    if (!matchCounts.has(match.product.id)) continue;
+    if (!match.eligible || !match.recommended || match.confidence !== "high") continue;
+    matchCounts.set(match.product.id, (matchCounts.get(match.product.id) ?? 0) + 1);
+  }
+  database.recordProductMatchResults(
+    shopId,
+    [...matchCounts].map(([productId, matchCount]) => ({ productId, matchCount })),
+  );
+  return Object.fromEntries(database.productSubmissionProgress(shopId, [...matchCounts.keys()]));
 }
 
 export function isAllowedCaptureSource(value: string): boolean {
@@ -509,7 +549,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
   });
 
   app.post<{
-    Body: { shopId?: string; productIds?: unknown; source?: string };
+    Body: { shopId?: string; productIds?: unknown; source?: string; strategy?: unknown };
   }>("/api/opportunity-matches", async (request, reply) => {
     const shopId = text(request.body?.shopId);
     const productIds = Array.isArray(request.body?.productIds)
@@ -525,6 +565,14 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (productIds.length > 20) {
       return reply.code(400).send({ error: "MVP 单次最多匹配 20 个商品" });
     }
+    let strategy: MatchStrategy;
+    try {
+      strategy = parseMatchStrategy(request.body?.strategy);
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : "匹配策略无效",
+      });
+    }
     const requestedSource = text(request.body?.source) || "auto";
     if (!["auto", "api", "extension"].includes(requestedSource)) {
       return reply.code(400).send({ error: "source 仅支持 auto、api 或 extension" });
@@ -538,15 +586,18 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       if (!runner.configured || !shop.apiConfigured) {
         return reply.code(400).send({ error: "该店铺未配置可用的 TikTok API 凭证" });
       }
-      return { ...(await runner.matchProducts(shopId, productIds)), source };
+      const result = await runner.matchProducts(shopId, productIds, strategy);
+      return { ...result, source, productProgress: recordMatchProgress(database, shopId, result) };
     }
+    let result: ProductMatchResult;
     try {
-      return { ...runner.matchCapturedProducts(shopId, productIds), source };
+      result = runner.matchCapturedProducts(shopId, productIds, strategy);
     } catch (error) {
       return reply.code(400).send({
         error: error instanceof Error ? error.message : "插件快照匹配失败",
       });
     }
+    return { ...result, source, productProgress: recordMatchProgress(database, shopId, result) };
   });
 
   app.post<{
