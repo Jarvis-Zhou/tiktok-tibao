@@ -6,7 +6,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import type { AppConfig } from "../src/config.js";
 import { TibaoDatabase } from "../src/database.js";
-import { isAllowedCaptureSource, registerRoutes } from "../src/routes.js";
+import { captureRegionFromUrl, isAllowedCaptureSource, registerRoutes } from "../src/routes.js";
 import { ApiRunner } from "../src/runner.js";
 import { TokenVault } from "../src/token-vault.js";
 import type { TikTokOAuthClient } from "../src/routes.js";
@@ -32,9 +32,18 @@ test("allows trusted Seller Center and fixture sources without accepting lookali
     false,
   );
   assert.equal(isAllowedCaptureSource("https://example.com/products"), false);
+  assert.equal(
+    captureRegionFromUrl(
+      "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MY",
+    ),
+    "MY",
+  );
+  assert.equal(captureRegionFromUrl("https://seller.tiktokglobalshop.com/products?region=us"), "US");
+  assert.equal(captureRegionFromUrl("https://seller-mx.tiktok.com/products"), "MX");
+  assert.equal(captureRegionFromUrl("not-a-url"), "");
 });
 
-test("completes OAuth callback once and imports only authorized MX shops", async () => {
+test("completes OAuth callback once and imports every authorized shop with its region", async () => {
   const directory = mkdtempSync(join(tmpdir(), "tibao-oauth-routes-test-"));
   const database = new TibaoDatabase(join(directory, "queue.sqlite"));
   const vault = new TokenVault("a-test-key-that-is-long-enough");
@@ -71,12 +80,23 @@ test("completes OAuth callback once and imports only authorized MX shops", async
       };
     },
     listAuthorizedShops: async (accessToken) => {
+      if (accessToken === "manual-access-token") {
+        return {
+          data: {
+            shops: [
+              { cipher: "my-cipher", code: "MY001", name: "Malaysia Shop", region: "MY" },
+            ],
+          },
+          requestId: "manual-shops-request",
+        };
+      }
       assert.equal(accessToken, "oauth-access-token");
       return {
         data: {
           shops: [
             { cipher: "mx-cipher", code: "MX001", name: "Mexico Shop", region: "MX" },
             { cipher: "us-cipher", code: "US001", name: "US Shop", region: "US" },
+            { cipher: "fallback-cipher", code: "OTHER001", name: "Fallback Shop" },
           ],
         },
         requestId: "shops-request",
@@ -106,13 +126,30 @@ test("completes OAuth callback once and imports only authorized MX shops", async
       url: `/api/oauth/tiktok/callback?code=callback-code&state=${encodeURIComponent(state)}`,
     });
     assert.equal(callback.statusCode, 302);
-    assert.equal(callback.headers.location, "/?oauth=success&shops=1");
+    assert.equal(callback.headers.location, "/?oauth=success&shops=3&regions=MX%2CUS");
     assert.equal(exchangedCodes, 1);
     const shops = database.listShops();
-    assert.equal(shops.length, 1);
-    assert.equal(shops[0]?.shopCipher, "mx-cipher");
-    const saved = database.getShop(shops[0]?.id ?? "");
-    assert.equal(vault.decrypt(saved?.encryptedAccessToken ?? ""), "oauth-access-token");
+    assert.equal(shops.length, 3);
+    const shopsByCipher = new Map(shops.map((shop) => [shop.shopCipher, shop]));
+    assert.equal(shopsByCipher.get("mx-cipher")?.region, "MX");
+    assert.equal(shopsByCipher.get("us-cipher")?.region, "US");
+    assert.equal(shopsByCipher.get("fallback-cipher")?.region, "MX");
+    for (const shop of shops) {
+      const saved = database.getShop(shop.id);
+      assert.equal(vault.decrypt(saved?.encryptedAccessToken ?? ""), "oauth-access-token");
+    }
+
+    const manual = await app.inject({
+      method: "POST",
+      url: "/api/shops",
+      payload: {
+        name: "Malaysia Shop",
+        shopCipher: "my-cipher",
+        accessToken: "manual-access-token",
+      },
+    });
+    assert.equal(manual.statusCode, 201);
+    assert.equal(manual.json().shop.region, "MY");
 
     const replay = await app.inject({
       method: "GET",
@@ -217,6 +254,15 @@ test("imports extension-captured products with shared-key authentication", async
   try {
     const shop = database.createShop({ name: "MX extension shop" });
     await registerRoutes(app, { config, database, vault, runner });
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    assert.deepEqual(health.json().oauthMissingSettings, [
+      "TIKTOK_APP_KEY",
+      "TIKTOK_APP_SECRET",
+      "TOKEN_ENCRYPTION_KEY",
+    ]);
+    const oauthStart = await app.inject({ method: "GET", url: "/api/oauth/tiktok/start" });
+    assert.equal(oauthStart.statusCode, 503);
+    assert.match(oauthStart.json().error, /TOKEN_ENCRYPTION_KEY/);
     const payload = {
       shopId: shop.id,
       sourceUrl: "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MY",
@@ -250,6 +296,7 @@ test("imports extension-captured products with shared-key authentication", async
     });
     assert.equal(imported.statusCode, 201);
     assert.deepEqual(imported.json().result, { total: 1, inserted: 1, updated: 0 });
+    assert.equal(database.getShop(shop.id)?.region, "MY");
 
     const listed = await app.inject({
       method: "GET",

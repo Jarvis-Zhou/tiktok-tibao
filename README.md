@@ -1,6 +1,6 @@
 # Tibao
 
-墨西哥 TikTok Shop “Product Opportunities”批量提报 MVP。项目共用一套导入、校验、幂等和结果台账，同时提供两个执行通道：
+TikTok Shop 多地域 “Product Opportunities” 批量提报 MVP。项目共用一套导入、校验、幂等和结果台账，同时提供两个执行通道：
 
 - **A / API**：服务端逐条调用官方 Product Opportunities API。
 - **C / Chrome Extension**：复用运营人员当前 Seller Center 登录态，辅助打开页面和填写商品 ID；默认最终提交需人工确认。
@@ -10,7 +10,7 @@
 - Excel / CSV 导入，中英文表头归一化，文件内和历史任务双重去重。
 - SQLite 持久化任务队列；支持失败重试、租约超时恢复、显式切换执行通道。
 - TikTok Shop Open API HMAC-SHA256 签名、保守串行限流、瞬时错误重试、request ID 记录。
-- TikTok Shop OAuth 授权入口与回调：一次性 state 校验、授权码换 Token、自动发现并导入 MX 店铺。
+- TikTok Shop OAuth 授权入口与回调：一次性 state 校验、授权码换 Token、自动发现并导入全部已授权店铺及其地域。
 - 店铺 Access Token 使用 AES-256-GCM 加密存储。
 - 店铺商品分页读取；支持在管理页勾选商品或直接粘贴 Product ID。
 - 同时拉取 PRODUCT / KEYWORD / CATEGORY 机会，读取机会详情并进行本地硬过滤与可解释评分。
@@ -53,9 +53,11 @@ http://127.0.0.1:3210/api/oauth/tiktok/callback
 
 建议用 `openssl rand -hex 32` 分别生成两个随机值。不要把真实密钥、Access Token 或 `.env` 发到群里或提交到 Git。
 
+如果页面提示“服务端 OAuth 配置不完整”，请确认 `TIKTOK_APP_KEY`、`TIKTOK_APP_SECRET`、`TOKEN_ENCRYPTION_KEY` 都位于仓库根目录的 `.env`，然后完整停止并重新执行 `npm run dev`。访问 <http://127.0.0.1:3210/api/health> 可查看 `oauthMissingSettings`，只会返回缺失的变量名，不会返回密钥值。
+
 首次验证顺序：
 
-1. 点击“登录 TikTok Shop 并授权”；回调成功后会自动换取 Access Token，并从 `GET /authorization/202309/shops` 导入 MX 店铺的 `shop_cipher`。也可保留手动录入作为备用。
+1. 点击“登录 TikTok Shop 并授权”；回调成功后会自动换取 Access Token，并从 `GET /authorization/202309/shops` 导入全部已授权店铺的 `shop_cipher` 与 `region`。也可保留手动录入作为备用。
 2. 点击“测试 API”，只调用 `List Opportunity`。
 3. 点击“读取店铺商品”，先选择 1 个商品并运行机会匹配。
 4. 逐条检查匹配理由，只勾选明确正确的商品—机会组合。
@@ -80,10 +82,12 @@ http://127.0.0.1:3210/api/oauth/tiktok/callback
 1. 管理页请求 `/api/oauth/tiktok/start`，服务生成 10 分钟有效且只能使用一次的随机 `state`。
 2. 浏览器跳转到 TikTok Shop 授权页；TikTok 按 Partner Center 中登记的地址回调 `/api/oauth/tiktok/callback`。
 3. 服务校验并立即消费 `state`，使用回调中的 `code` / `auth_code` 调用 `GET https://auth.tiktok-shops.com/api/v2/token/get`。
-4. 服务使用 Access Token 调用 `GET /authorization/202309/shops`，只导入 `region=MX` 的店铺，并将 Token 用 AES-256-GCM 加密后写入 SQLite。
-5. 浏览器回到管理页，只显示成功数量或错误信息；Access Token、App Secret 与授权码不会返回前端。
+4. 服务使用 Access Token 调用 `GET /authorization/202309/shops`，导入所有带 `shop_cipher` 的店铺，并将每个店铺返回的 `region` 和 AES-256-GCM 加密后的 Token 写入 SQLite；单店未返回地域时使用 OAuth 的 `seller_base_region` 兜底。
+5. 浏览器回到管理页，只显示成功数量、地域或错误信息；Access Token、App Secret 与授权码不会返回前端。
 
-取消授权、state 过期或授权账号中没有 MX 店铺时不会写入店铺。当前服务只监听本机回环地址；不要为了 OAuth 回调直接把未鉴权的管理页长期暴露到公网。
+手动录入 API 凭证时，服务也会通过授权店铺接口匹配 Shop Cipher 并自动记录地域。Chrome 插件导入 Seller Center 快照时，则从页面 URL 的 `shop_region` / `region` 参数更新店铺地域。无法可靠识别时保持“地域待识别”，不会猜测。
+
+取消授权、state 过期或授权账号中没有带 Shop Cipher 的店铺时不会写入店铺。当前服务只监听本机回环地址；不要为了 OAuth 回调直接把未鉴权的管理页长期暴露到公网。
 
 ## 导入格式
 
@@ -161,8 +165,8 @@ npm run build
 
 ## MVP 边界
 
-- 已实现 OAuth 回调、Access Token 加密保存和 MX Shop Cipher 自动发现；Refresh Token 自动续期尚未接入，Token 过期后需重新授权。
-- 商品目录与商品详情使用 TikTok Shop Product API `202309` 版本；上线前应使用目标 Partner App 在 MX 店铺沙箱/小流量环境核对该版本和授权 scope。
+- 已实现 OAuth 回调、Access Token 加密保存，以及多地域 Shop Cipher / region 自动发现；Refresh Token 自动续期尚未接入，Token 过期后需重新授权。
+- 商品目录与商品详情使用 TikTok Shop Product API `202309` 版本；上线前应使用目标 Partner App 在各目标地域店铺的沙箱/小流量环境核对该版本和授权 scope。
 - Chrome 插件只转发归一化后的商品/机会字段，不转发原始响应、Cookie、请求头或 Token。Seller Center 内部响应字段改版后可能需要更新归一化规则。
 - 服务默认只监听 `127.0.0.1`，没有公网登录鉴权；不要改为 `0.0.0.0` 暴露到互联网。
 - 单批最多 5000 行，API 默认单并发、间隔 750ms、最多尝试 3 次。

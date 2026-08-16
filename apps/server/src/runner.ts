@@ -113,7 +113,7 @@ export class ApiRunner {
   async testShop(shopId: string): Promise<unknown> {
     const client = this.clientForShopId(shopId);
     return this.readRequest(() =>
-      client.queryOpportunities({ opportunity_type: "PRODUCT" }, { page_size: 1, locale: "es-MX" }),
+      client.queryOpportunities({ opportunity_type: "PRODUCT" }, { page_size: 1 }),
     );
   }
 
@@ -180,7 +180,7 @@ export class ApiRunner {
                   opportunity_type: opportunityType,
                   ...(leafCategoryId ? { category_ids: [leafCategoryId] } : {}),
                 },
-                { page_size: 20, locale: "es-MX" },
+                { page_size: 20 },
               ),
             );
             queried = extractOpportunityRecords(response.data)

@@ -43,7 +43,7 @@ function formatTime(value) {
 
 function formatPrice(product) {
   if (product.price === null || product.price === undefined) return "—";
-  return `${product.currency || ""} ${Number(product.price).toLocaleString("es-MX")}`.trim();
+  return `${product.currency || ""} ${Number(product.price).toLocaleString()}`.trim();
 }
 
 async function loadHealth() {
@@ -57,9 +57,13 @@ async function loadHealth() {
   $("#health").className = `health ${ready ? "ok" : "warn"}`;
   const oauthButton = $("#oauth-connect");
   oauthButton.disabled = !health.oauthConfigured;
+  const oauthIssues = [
+    ...(Array.isArray(health.oauthMissingSettings) ? health.oauthMissingSettings : []),
+    ...(health.oauthClientConfigured === false ? ["OAuth 客户端未初始化"] : []),
+  ];
   $("#oauth-status").textContent = health.oauthConfigured
-    ? "OAuth 已就绪；授权页返回后会自动添加该账号下的 MX 店铺。"
-    : "请先在 .env 配置 App Key、App Secret 与 Token 加密密钥，然后重启服务。";
+    ? "OAuth 已就绪；授权后会添加账号下的店铺，并自动记录各店铺地域。"
+    : `OAuth 未就绪：${oauthIssues.length ? `缺少 ${oauthIssues.join("、")}` : "配置未生效"}。请修改仓库根目录 .env 后重启服务。`;
   $("#oauth-callback-url").textContent = new URL(
     health.oauthCallbackPath || "/api/oauth/tiktok/callback",
     window.location.origin,
@@ -71,7 +75,9 @@ function showOAuthResult() {
   const result = search.get("oauth");
   if (!result) return;
   if (result === "success") {
-    toast(`OAuth 授权成功，已连接 ${search.get("shops") || "1"} 个 MX 店铺`);
+    const regions = (search.get("regions") || "").split(",").filter(Boolean);
+    const regionLabel = regions.length ? `（地域：${regions.join("、")}）` : "";
+    toast(`OAuth 授权成功，已连接 ${search.get("shops") || "1"} 个店铺${regionLabel}`);
   } else {
     toast(search.get("message") || "OAuth 授权失败，请重试", true);
   }
@@ -80,7 +86,7 @@ function showOAuthResult() {
 
 function shopOptions(selectedValue) {
   const options = state.shops
-    .map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(shop.name)}</option>`)
+    .map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(shop.name)}${shop.region ? ` · ${escapeHtml(shop.region)}` : ""}</option>`)
     .join("");
   return {
     html: `<option value="">选择店铺</option>${options}`,
@@ -92,7 +98,7 @@ async function loadShops() {
   state.shops = (await api("/api/shops")).shops;
   $("#shops").innerHTML = state.shops.length
     ? state.shops
-      .map((shop) => `<div class="shop"><div><strong>${escapeHtml(shop.name)}</strong><code>${escapeHtml(shop.id)}</code></div>${shop.apiConfigured ? `<button class="ghost small" data-shop-test="${escapeHtml(shop.id)}">测试 API</button>` : '<span class="badge">插件店铺</span>'}</div>`)
+      .map((shop) => `<div class="shop"><div><strong>${escapeHtml(shop.name)}</strong><code>${escapeHtml(shop.id)}</code></div><div class="actions">${shop.region ? `<span class="badge">${escapeHtml(shop.region)}</span>` : '<span class="badge">地域待识别</span>'}${shop.apiConfigured ? `<button class="ghost small" data-shop-test="${escapeHtml(shop.id)}">测试 API</button>` : '<span class="badge">插件店铺</span>'}</div></div>`)
       .join("")
     : '<p class="hint">尚未保存店铺。</p>';
 

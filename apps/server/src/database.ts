@@ -18,6 +18,7 @@ export interface ShopPublic {
   id: string;
   name: string;
   shopCipher: string;
+  region: string;
   apiConfigured: boolean;
   createdAt: string;
   updatedAt: string;
@@ -113,6 +114,7 @@ function shopPublicFromRow(row: SqlRow): ShopPublic {
     id: String(row.id),
     name: String(row.name),
     shopCipher: String(row.shop_cipher),
+    region: String(row.region ?? ""),
     apiConfigured: Boolean(String(row.access_token_encrypted ?? "")),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -199,6 +201,7 @@ export class TibaoDatabase {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         shop_cipher TEXT NOT NULL UNIQUE,
+        region TEXT NOT NULL DEFAULT '',
         access_token_encrypted TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -304,6 +307,15 @@ export class TibaoDatabase {
         ON captured_opportunities(shop_id, updated_at DESC);
     `);
 
+    const shopColumns = new Set(
+      (this.raw.prepare("PRAGMA table_info(shops)").all() as SqlRow[]).map((row) =>
+        String(row.name),
+      ),
+    );
+    if (!shopColumns.has("region")) {
+      this.raw.exec("ALTER TABLE shops ADD COLUMN region TEXT NOT NULL DEFAULT ''");
+    }
+
     const capturedProductColumns = new Set(
       (this.raw.prepare("PRAGMA table_info(captured_products)").all() as SqlRow[]).map((row) =>
         String(row.name),
@@ -345,24 +357,39 @@ export class TibaoDatabase {
   createShop(input: {
     name: string;
     shopCipher?: string;
+    region?: string;
     encryptedAccessToken?: string;
   }): ShopPublic {
     const timestamp = nowIso();
     const id = randomUUID();
     const shopCipher = input.shopCipher?.trim() || `extension:${id}`;
+    const region = input.region?.trim().toUpperCase() || "";
     const encryptedAccessToken = input.encryptedAccessToken ?? "";
     this.raw
       .prepare(`
-        INSERT INTO shops (id, name, shop_cipher, access_token_encrypted, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO shops (
+          id, name, shop_cipher, region, access_token_encrypted, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(shop_cipher) DO UPDATE SET
           name = excluded.name,
+          region = CASE WHEN excluded.region <> '' THEN excluded.region ELSE shops.region END,
           access_token_encrypted = excluded.access_token_encrypted,
           updated_at = excluded.updated_at
       `)
-      .run(id, input.name, shopCipher, encryptedAccessToken, timestamp, timestamp);
+      .run(id, input.name, shopCipher, region, encryptedAccessToken, timestamp, timestamp);
     const row = this.raw.prepare("SELECT * FROM shops WHERE shop_cipher = ?").get(shopCipher) as SqlRow;
     return shopPublicFromRow(row);
+  }
+
+  updateShopRegion(id: string, region: string): ShopPublic | null {
+    const normalized = region.trim().toUpperCase();
+    if (!normalized) return this.getShop(id);
+    this.raw
+      .prepare("UPDATE shops SET region = ?, updated_at = ? WHERE id = ?")
+      .run(normalized, nowIso(), id);
+    const row = this.raw.prepare("SELECT * FROM shops WHERE id = ?").get(id) as SqlRow | undefined;
+    return row ? shopPublicFromRow(row) : null;
   }
 
   listShops(): ShopPublic[] {

@@ -42,6 +42,24 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeRegion(value: unknown): string {
+  const region = text(value).toUpperCase();
+  return /^[A-Z0-9_-]{2,16}$/.test(region) ? region : "";
+}
+
+export function captureRegionFromUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const fromQuery = normalizeRegion(
+      url.searchParams.get("shop_region") || url.searchParams.get("region"),
+    );
+    if (fromQuery) return fromQuery;
+    return url.hostname === "seller-mx.tiktok.com" ? "MX" : "";
+  } catch {
+    return "";
+  }
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 class SnapshotValidationError extends Error {}
@@ -239,14 +257,34 @@ function verifyExtension(
   return true;
 }
 
+function missingOAuthSettings(config: AppConfig, vault: TokenVault): string[] {
+  const missing: string[] = [];
+  if (!config.tiktokAppKey) missing.push("TIKTOK_APP_KEY");
+  if (!config.tiktokAppSecret) missing.push("TIKTOK_APP_SECRET");
+  if (!vault.available) missing.push("TOKEN_ENCRYPTION_KEY");
+  return missing;
+}
+
 export async function registerRoutes(app: FastifyInstance, deps: RouteDependencies): Promise<void> {
   const { config, database, vault, runner, oauthClient } = deps;
-  const oauthConfigured = Boolean(oauthClient) && isTikTokAppConfigured(config) && vault.available;
+  const oauthMissingSettings = missingOAuthSettings(config, vault);
+  const oauthConfigurationIssues = [
+    ...oauthMissingSettings,
+    ...(!oauthClient ? ["OAuth 客户端未初始化"] : []),
+  ];
+  const oauthConfigured = oauthConfigurationIssues.length === 0;
+  const oauthConfigurationMessage = `服务端 OAuth 配置不完整：${
+    oauthConfigurationIssues.length > 0
+      ? `缺少 ${oauthConfigurationIssues.join("、")}`
+      : "未知配置错误"
+  }。请修改仓库根目录 .env 后重启服务`;
 
   app.get("/api/health", async () => ({
     ok: true,
     apiConfigured: isTikTokAppConfigured(config) && vault.available,
     oauthConfigured,
+    oauthMissingSettings,
+    oauthClientConfigured: Boolean(oauthClient),
     oauthCallbackPath: "/api/oauth/tiktok/callback",
     appCredentialsConfigured: isTikTokAppConfigured(config),
     tokenEncryptionConfigured: vault.available,
@@ -256,9 +294,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
 
   app.get("/api/oauth/tiktok/start", async (_request, reply) => {
     if (!oauthConfigured || !oauthClient) {
-      return reply.code(503).send({
-        error: "请先配置 TIKTOK_APP_KEY、TIKTOK_APP_SECRET 和 TOKEN_ENCRYPTION_KEY",
-      });
+      return reply.code(503).send({ error: oauthConfigurationMessage });
     }
     const state = database.createOAuthState();
     return reply
@@ -288,7 +324,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       };
 
       if (!oauthConfigured || !oauthClient) {
-        return redirect("error", { message: "服务端 OAuth 配置不完整" });
+        return redirect("error", { message: oauthConfigurationMessage });
       }
       const state = text(request.query.state);
       if (!state || !database.consumeOAuthState(state)) {
@@ -306,36 +342,40 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
       try {
         const token = await oauthClient.exchangeCode(authCode);
         const authorized = await oauthClient.listAuthorizedShops(token.data.access_token);
-        const sellerRegion = text(token.data.seller_base_region).toUpperCase();
+        const sellerRegion = normalizeRegion(token.data.seller_base_region);
         const shops = authorized.data.shops ?? [];
-        const mxShops = [
+        const importableShops = [
           ...new Map(
             shops
-              .filter((shop) => {
-                const region = text(shop.region).toUpperCase();
-                return region === "MX" || (!region && sellerRegion === "MX");
-              })
+              .filter((shop) => Boolean(text(shop.cipher)))
               .map((shop) => [text(shop.cipher), shop]),
           ).values(),
-        ].filter((shop) => Boolean(text(shop.cipher)));
-        if (mxShops.length === 0) {
-          const regions = [...new Set(shops.map((shop) => text(shop.region)).filter(Boolean))];
-          const suffix = regions.length > 0 ? `（授权店铺地区：${regions.join("、")}）` : "";
-          throw new Error(`本次授权没有返回墨西哥（MX）店铺${suffix}`);
+        ];
+        if (importableShops.length === 0) {
+          throw new Error("本次授权没有返回带 Shop Cipher 的店铺");
         }
 
         const encryptedAccessToken = vault.encrypt(token.data.access_token);
-        for (const shop of mxShops) {
+        const importedRegions = new Set<string>();
+        for (const shop of importableShops) {
+          const region = normalizeRegion(shop.region) || sellerRegion;
+          if (region) importedRegions.add(region);
           database.createShop({
             name:
               text(shop.name) ||
               text(token.data.seller_name) ||
-              `TikTok MX ${text(shop.code) || text(shop.id) || text(shop.cipher).slice(-6)}`,
+              `TikTok ${region || "Shop"} ${
+                text(shop.code) || text(shop.id) || text(shop.cipher).slice(-6)
+              }`,
             shopCipher: text(shop.cipher),
+            region,
             encryptedAccessToken,
           });
         }
-        return redirect("success", { shops: String(mxShops.length) });
+        return redirect("success", {
+          shops: String(importableShops.length),
+          ...(importedRegions.size > 0 ? { regions: [...importedRegions].sort().join(",") } : {}),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "TikTok OAuth 处理失败";
         return redirect("error", { message: message.slice(0, 300) });
@@ -358,10 +398,23 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (accessToken && !vault.available) {
       return reply.code(400).send({ error: "保存 API Token 前请先配置 TOKEN_ENCRYPTION_KEY" });
     }
+    let region = "";
+    if (accessToken && oauthClient && isTikTokAppConfigured(config)) {
+      try {
+        const authorized = await oauthClient.listAuthorizedShops(accessToken);
+        const matchingShop = authorized.data.shops?.find(
+          (shop) => text(shop.cipher) === shopCipher,
+        );
+        region = normalizeRegion(matchingShop?.region);
+      } catch {
+        // Manual entry remains a fallback when the authorization lookup is unavailable.
+      }
+    }
     const shop = accessToken
       ? database.createShop({
           name,
           shopCipher,
+          region,
           encryptedAccessToken: vault.encrypt(accessToken),
         })
       : database.createShop({ name });
@@ -710,6 +763,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (!isAllowedCaptureSource(sourceUrl)) {
       return reply.code(400).send({ error: "仅允许导入 Seller Center 或本地测试页采集的数据" });
     }
+    const capturedRegion = captureRegionFromUrl(sourceUrl);
+    if (capturedRegion) database.updateShopRegion(shopId, capturedRegion);
     const capturedAtText = text(request.body?.capturedAt);
     const capturedAt = capturedAtText || new Date().toISOString();
     if (!Number.isFinite(Date.parse(capturedAt))) {
@@ -760,6 +815,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     if (!isAllowedCaptureSource(sourceUrl)) {
       return reply.code(400).send({ error: "仅允许导入 Seller Center 或本地测试页采集的数据" });
     }
+    const capturedRegion = captureRegionFromUrl(sourceUrl);
+    if (capturedRegion) database.updateShopRegion(shopId, capturedRegion);
     const capturedAtText = text(request.body?.capturedAt);
     const capturedAt = capturedAtText || new Date().toISOString();
     if (!Number.isFinite(Date.parse(capturedAt))) {

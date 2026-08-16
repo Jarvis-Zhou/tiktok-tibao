@@ -16,11 +16,20 @@ test("encrypts tokens and persists a deduplicated task queue", () => {
     assert.notEqual(encrypted, "access-token");
     assert.equal(vault.decrypt(encrypted), "access-token");
 
-    const shop = database.createShop({
+    const createdShop = database.createShop({
       name: "MX test",
+      shopCipher: "cipher-1",
+      region: "mx",
+      encryptedAccessToken: encrypted,
+    });
+    assert.equal(createdShop.region, "MX");
+    const shop = database.createShop({
+      name: "Renamed test shop",
       shopCipher: "cipher-1",
       encryptedAccessToken: encrypted,
     });
+    assert.equal(shop.id, createdShop.id);
+    assert.equal(shop.region, "MX");
     const input = {
       sourceRow: 2,
       shopId: shop.id,
@@ -249,6 +258,11 @@ test("migrates previously captured product rows without losing their category na
   try {
     const products = database.listCapturedProducts("shop-legacy");
     assert.deepEqual(products[0]?.categoryNames, ["Hogar"]);
+    assert.equal(database.getShop("shop-legacy")?.region, "");
+    const shopColumns = database.raw.prepare("PRAGMA table_info(shops)").all() as Array<{
+      name: string;
+    }>;
+    assert.ok(shopColumns.some((column) => column.name === "region"));
     const columns = database.raw.prepare("PRAGMA table_info(captured_products)").all() as Array<{
       name: string;
     }>;
