@@ -153,7 +153,7 @@ http://127.0.0.1:3210/video-studio/
 
 当前集成的是 `viral-video-remix-hifi` 的高保真交互原型：分析进度、场景重生成、成片生成和导出均为演示，不会调用真实 AI 模型，也不会生成 MP4。接入真实能力时应在服务端增加上传存储、异步任务台账和模型供应商适配层，密钥只保存在服务端。
 
-真实后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。V1 的正式产物是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出。
+功能基线见 [`docs/video-prd.md`](docs/video-prd.md)，后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。V1 的正式产物是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出。
 
 ## 验证命令
 
