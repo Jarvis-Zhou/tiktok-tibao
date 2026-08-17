@@ -178,6 +178,25 @@ function renderProductSelectionSummary() {
     ? `已选择 ${ids.length} 个商品${ids.length > MAX_PRODUCTS_PER_MATCH ? `，超过单次上限 ${MAX_PRODUCTS_PER_MATCH}` : ""}。`
     : "尚未选择商品。";
   node.className = `hint${ids.length > MAX_PRODUCTS_PER_MATCH ? " error-text" : ""}`;
+  const videoButton = $("#create-video-from-product");
+  videoButton.disabled = ids.length !== 1;
+  videoButton.title = ids.length === 1 ? "把该商品带入 AI 视频工作台" : "请只选择 1 个商品";
+}
+
+function openVideoStudioForSelectedProduct() {
+  const ids = allSelectedProductIds();
+  if (ids.length !== 1) throw new Error("进入 AI 视频工作台前请只选择 1 个商品");
+  const product = state.products.find((item) => item.id === ids[0]);
+  const handoff = {
+    id: ids[0],
+    title: product?.title || ids[0],
+    category: product?.categoryNames?.at(-1) || product?.categoryIds?.at(-1) || "",
+    brandName: product?.brandName || "",
+    shopId: $("#match-shop-select").value,
+  };
+  sessionStorage.setItem("tibao:video-product", JSON.stringify(handoff));
+  const params = new URLSearchParams({ source: "tibao", productId: handoff.id });
+  window.location.assign(`/video-studio/?${params}`);
 }
 
 function productProgressState(product) {
@@ -555,6 +574,8 @@ document.addEventListener("click", async (event) => {
       await selectNextPendingProducts();
     } else if (button.id === "match-products") {
       await matchSelectedProducts();
+    } else if (button.id === "create-video-from-product") {
+      openVideoStudioForSelectedProduct();
     } else if (button.id === "create-match-batch") {
       await createMatchedBatch();
     } else if (button.dataset.shopTest) {

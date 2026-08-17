@@ -12,7 +12,10 @@
         <p class="eyebrow">TIKTOK SHOP · MVP</p>
         <h1>商品机会批量提报台</h1>
       </div>
-      <div id="health" class="health">正在检查配置…</div>
+      <div class="topbar-actions">
+        <a class="video-studio-nav" href="/video-studio/">AI 视频工作台</a>
+        <div id="health" class="health">正在检查配置…</div>
+      </div>
     </header>
 
     <main>
@@ -103,7 +106,10 @@
         </div>
         <div class="match-action-row">
           <p id="product-selection-summary" class="hint">尚未选择商品。</p>
-          <button class="primary" id="match-products" type="button">获取并匹配机会</button>
+          <div class="match-action-buttons">
+            <button class="ghost" id="create-video-from-product" type="button" disabled>用所选商品制作 AI 视频</button>
+            <button class="primary" id="match-products" type="button">获取并匹配机会</button>
+          </div>
         </div>
         <div id="match-progress" class="match-progress" hidden></div>
         <div id="match-results" hidden>

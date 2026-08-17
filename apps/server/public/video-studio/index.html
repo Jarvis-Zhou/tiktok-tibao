@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#101522">
+  <meta name="description" content="Tibao 内置的爆款短视频结构迁移与商品素材重制高保真演示工作台">
+  <title>Tibao · AI 视频工作台（演示）</title>
+  <link rel="preconnect" href="https://miaoda.feishu.cn">
+  <link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="setup.css">
+  <link rel="stylesheet" href="art-styles.css">
+  <link rel="stylesheet" href="editor.css">
+  <link rel="stylesheet" href="timeline.css">
+  <script src="https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://sf3-scmcdn-cn.feishucdn.com/obj/feishu-static/miaoda/coding-unpkg-sdk/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "palette": ["#ff6846", "#101522", "#60e5c8"],
+      "density": "舒展",
+      "previewScale": 100,
+      "showSafeArea": true
+    }/*EDITMODE-END*/;
+    window.TWEAK_DEFAULTS = TWEAK_DEFAULTS;
+  </script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="art.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

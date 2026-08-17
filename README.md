@@ -139,6 +139,20 @@ npm run package:extension
 
 产物位于 `apps/extension/dist/tibao-extension-<version>.zip`，压缩包根目录直接包含 `manifest.json`。Chrome 的开发者模式不能直接加载 ZIP；本地测试时先解压，再选择“加载已解压的扩展程序”。
 
+## AI 视频工作台
+
+本地服务同时挂载了 ReCut 高保真视频工作台：
+
+```text
+http://127.0.0.1:3210/video-studio/
+```
+
+可以从管理页顶部直接进入；也可以在商品列表中只勾选一个商品，然后点击“用所选商品制作 AI 视频”。后者会通过同源 `sessionStorage` 把商品 ID、标题、类目和品牌带入工作台，不会把店铺 Token、Cookie 或其他凭证传给视频页面。
+
+工作台支持粘贴参考视频链接，或选择不超过 200 MB 的本地 MP4，并上传一张 PNG、JPG 或 WebP 商品图片。本地文件只存在当前浏览器会话中，不会上传到 Tibao 服务端。
+
+当前集成的是 `viral-video-remix-hifi` 的高保真交互原型：分析进度、场景重生成、成片生成和导出均为演示，不会调用真实 AI 模型，也不会生成 MP4。接入真实能力时应在服务端增加上传存储、异步任务台账和模型供应商适配层，密钥只保存在服务端。
+
 ## 验证命令
 
 ```bash

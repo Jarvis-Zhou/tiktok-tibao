@@ -1,0 +1,112 @@
+/* Reference frame art */
+.reference-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: white;
+  background: #bd896d;
+}
+
+.ref-wall {
+  position: absolute;
+  inset: 0 0 34%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  background: #d6c9b5;
+}
+
+.ref-wall span {
+  border-right: 1px solid rgba(97, 67, 52, 0.15);
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.3), transparent 48%);
+}
+
+.ref-table {
+  position: absolute;
+  right: -10%;
+  bottom: -7%;
+  left: -10%;
+  height: 48%;
+  background: #93644f;
+  transform: skewY(-4deg);
+}
+
+.ref-hand {
+  position: absolute;
+  right: -13%;
+  bottom: 23%;
+  width: 62%;
+  height: 18%;
+  border-radius: 50% 0 0 50%;
+  background: #d7a786;
+  transform: rotate(-15deg);
+  box-shadow: inset 0 -5px 10px rgba(99, 52, 39, 0.15);
+}
+
+.ref-product {
+  position: absolute;
+  left: 34%;
+  bottom: 23%;
+  width: 30%;
+  height: 29%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 11%;
+  border-radius: 12% 12% 20% 20%;
+  color: #304b4d;
+  background: #8ecdc0;
+  box-shadow: inset 12px 0 15px rgba(255, 255, 255, 0.2), 0 16px 20px rgba(60, 29, 23, 0.28);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 9px;
+}
+
+.ref-product i {
+  position: absolute;
+  top: -19%;
+  width: 47%;
+  height: 23%;
+  border-radius: 15% 15% 0 0;
+  background: #e3e8dc;
+}
+
+.ref-caption {
+  position: absolute;
+  right: 8%;
+  bottom: 9%;
+  left: 8%;
+  padding: 5px 7px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: clamp(6px, 0.8vw, 11px);
+  font-weight: 700;
+  text-align: center;
+}
+
+.ref-creator {
+  position: absolute;
+  bottom: 3%;
+  left: 5%;
+  font-size: 7px;
+}
+
+.ref-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 50%;
+  background: rgba(10, 13, 20, 0.34);
+  backdrop-filter: blur(5px);
+  transform: translate(-50%, -50%);
+}
+
+.reference-frame.mini .ref-play {
+  width: 22px;
+  height: 22px;
+}

@@ -22,6 +22,9 @@ a { color: var(--accent); }
 .health { padding: 9px 12px; border: 1px solid #52606f; border-radius: 999px; font-size: 13px; }
 .health.ok { border-color: #55c9a5; color: #8cf0d0; }
 .health.warn { border-color: #e9ad53; color: #ffd188; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.video-studio-nav { padding: 9px 12px; border: 1px solid #65d6ce; border-radius: 999px; color: #8cf0d0; text-decoration: none; font-size: 13px; font-weight: 800; }
+.video-studio-nav:hover { background: rgba(101, 214, 206, .12); }
 main { width: min(1240px, calc(100% - 32px)); margin: 24px auto 56px; display: grid; gap: 18px; }
 .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 22px; box-shadow: 0 8px 24px rgba(17, 25, 35, .04); }
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 30px; background: linear-gradient(125deg, #fff, #eaf7f5); }
@@ -73,6 +76,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .match-action-row, .match-result-head, .result-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .match-action-row { margin-top: 14px; }
 .match-action-row .hint { margin: 0; }
+.match-action-buttons { display: flex; align-items: center; gap: 8px; }
 .match-progress { margin-top: 16px; padding: 12px 14px; border: 1px solid #b8ddd9; border-radius: 9px; background: #effaf8; color: var(--accent-dark); font-size: 13px; }
 .match-result-head { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .match-result-head h3 { margin: 0; }
@@ -123,6 +127,7 @@ td code { display: block; color: #475569; font-size: 11px; margin-top: 4px; }
 @media (max-width: 900px) {
   .grid.two { grid-template-columns: 1fr; }
   .hero, .extension-note, .task-title, .match-action-row, .match-result-head, .result-controls { align-items: flex-start; flex-direction: column; }
+  .topbar-actions, .match-action-buttons { flex-wrap: wrap; }
   .shop-layout { grid-template-columns: 1fr; }
   .match-controls, .product-progress-bar, .match-strategy-bar { grid-template-columns: 1fr; }
   .flow { white-space: normal; flex-wrap: wrap; }
