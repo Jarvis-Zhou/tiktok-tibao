@@ -32,10 +32,14 @@ test("serves the integrated video studio and Tibao handoff hooks", async (t) => 
   const consolePage = await app.inject({ method: "GET", url: "/" });
   assert.equal(consolePage.statusCode, 200);
   assert.match(consolePage.body, /id="create-video-from-product"/);
+  assert.match(consolePage.body, /id="auto-submit"/);
+  assert.match(consolePage.body, /一键自动提报全店商品/);
 
   const consoleApp = await app.inject({ method: "GET", url: "/app.js" });
   assert.equal(consoleApp.statusCode, 200);
   assert.match(consoleApp.body, /openVideoStudioForSelectedProduct/);
   assert.match(consoleApp.body, /sessionStorage\.setItem\("tibao:video-product"/);
   assert.match(consoleApp.body, /shopRegion/);
+  assert.match(consoleApp.body, /startAutomaticSubmission/);
+  assert.match(consoleApp.body, /\/api\/automatic-submissions/);
 });

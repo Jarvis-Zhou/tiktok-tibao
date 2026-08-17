@@ -670,6 +670,60 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
     return reply.code(201).send({ batch, started, productProgress });
   });
 
+  app.post<{
+    Body: { shopId?: string; source?: string; confirmed?: boolean };
+  }>("/api/automatic-submissions", async (request, reply) => {
+    if (request.body?.confirmed !== true) {
+      return reply.code(400).send({
+        error: "一键自动提报前必须明确确认将扫描全部商品并创建提报任务",
+      });
+    }
+    const shopId = text(request.body?.shopId);
+    const shop = shopId ? database.getShop(shopId) : null;
+    if (!shopId || !shop) {
+      return reply.code(400).send({ error: "请选择有效店铺" });
+    }
+    const requestedSource = text(request.body?.source) || "auto";
+    if (!["auto", "api", "extension"].includes(requestedSource)) {
+      return reply.code(400).send({ error: "source 仅支持 auto、api 或 extension" });
+    }
+    const source = requestedSource === "auto"
+      ? runner.configured && shop.apiConfigured
+        ? "api"
+        : "extension"
+      : requestedSource as "api" | "extension";
+    if (source === "api" && (!runner.configured || !shop.apiConfigured)) {
+      return reply.code(400).send({ error: "该店铺未配置可用的 TikTok API 凭证" });
+    }
+    try {
+      const result = runner.startAutomaticSubmission(shopId, source);
+      return reply.code(202).send(result);
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : "一键自动提报启动失败",
+      });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>(
+    "/api/automatic-submissions/:id",
+    async (request, reply) => {
+      const run = database.getAutomaticSubmissionRun(request.params.id);
+      if (!run) return reply.code(404).send({ error: "自动提报任务不存在" });
+      return { run };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/shops/:id/automatic-submissions/latest",
+    async (request, reply) => {
+      if (!database.getShop(request.params.id)) {
+        return reply.code(404).send({ error: "店铺不存在" });
+      }
+      return { run: database.getLatestAutomaticSubmissionRun(request.params.id) };
+    },
+  );
+
   app.get("/api/batches", async () => ({ batches: database.listBatches() }));
 
   app.get<{

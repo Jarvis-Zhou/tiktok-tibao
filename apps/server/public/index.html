@@ -22,11 +22,11 @@
       <section class="hero panel">
         <div>
           <span class="badge">A + C 双通道</span>
-          <h2>先选商品，再找机会，确认后批量提报</h2>
-          <p>工具读取商品与机会规则，在本地完成硬过滤和可解释评分；只有你勾选确认的组合才会进入 A / C 提报队列。</p>
+          <h2>手动精筛，或一键完成全店机会提报</h2>
+          <p>工具读取商品与机会规则，在本地完成硬过滤和可解释评分；手动模式由你逐条确认，一键模式只自动提交通过完整规则复核的高置信度组合。</p>
         </div>
         <div class="flow" aria-label="工作流程">
-          <span>选品</span><b>→</b><span>机会匹配</span><b>→</b><span>人工确认</span><b>→</b><span>API / 插件</span><b>→</b><span>结果台账</span>
+          <span>全店商品</span><b>→</b><span>严格匹配</span><b>→</b><span>去重</span><b>→</b><span>API / 插件</span><b>→</b><span>结果台账</span>
         </div>
       </section>
 
@@ -62,7 +62,7 @@
       <section class="panel match-panel">
         <div class="section-title">
           <div><p class="step">02</p><h2>选择商品并匹配机会</h2></div>
-          <span class="badge">最多 20 个商品 / 次</span>
+          <span class="badge">手动最多 20 个 / 自动扫描全店</span>
         </div>
         <div class="match-controls">
           <label>店铺<select id="match-shop-select"><option value="">请先添加店铺</option></select></label>
@@ -82,6 +82,15 @@
           </label>
           <p id="product-progress-summary" class="hint">读取商品后会根据本地提报台账显示进度。</p>
           <button class="ghost" id="select-next-pending" type="button">筛选并选择下 20 个</button>
+        </div>
+        <div class="automatic-submit-card">
+          <div>
+            <span class="badge">严格模式</span>
+            <h3>一键自动匹配并提报</h3>
+            <p>自动读取当前店铺全部分页商品，按 20 个分片匹配，只创建高置信度且未提报过的组合。API 店铺自动排队执行；插件店铺生成 C 通道任务。</p>
+          </div>
+          <button class="primary" id="auto-submit" type="button">一键自动提报全店商品</button>
+          <div id="auto-submit-progress" class="automatic-submit-progress" hidden aria-live="polite"></div>
         </div>
         <label class="manual-product-label">直接填写 Product ID（可选，每行或逗号分隔）
           <textarea id="manual-product-ids" rows="3" placeholder="无法从列表找到时，可在这里粘贴 Product ID"></textarea>

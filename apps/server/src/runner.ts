@@ -14,11 +14,17 @@ import {
   normalizeProduct,
   normalizeReviewStatus,
   scoreOpportunityMatch,
+  validateImportRows,
 } from "@tibao/core";
 import { TikTokApiError, TikTokShopClient } from "@tibao/tiktok-api";
 import type { AppConfig } from "./config.js";
 import { isTikTokAppConfigured } from "./config.js";
-import type { TibaoDatabase, ShopPrivate } from "./database.js";
+import type {
+  AutomaticSubmissionRun,
+  AutomaticSubmissionSource,
+  ShopPrivate,
+  TibaoDatabase,
+} from "./database.js";
 import type { TokenVault } from "./token-vault.js";
 
 function sleep(milliseconds: number): Promise<void> {
@@ -118,6 +124,11 @@ export interface CapturedTaskValidation {
   message: string;
 }
 
+export interface StartAutomaticSubmissionResult {
+  run: AutomaticSubmissionRun;
+  created: boolean;
+}
+
 function matchPairKey(productId: string, opportunityId: string): string {
   return `${productId.trim().toLowerCase()}\u001f${opportunityId.trim().toLowerCase()}`;
 }
@@ -138,12 +149,16 @@ function compareMatches(left: ProductOpportunityMatch, right: ProductOpportunity
 
 export class ApiRunner {
   private readonly runningBatches = new Set<string>();
+  private readonly queuedBatchIds = new Set<string>();
+  private readonly runningAutomaticSubmissions = new Set<string>();
 
   constructor(
     private readonly config: AppConfig,
     private readonly database: TibaoDatabase,
     private readonly vault: TokenVault,
-  ) {}
+  ) {
+    this.database.failInterruptedAutomaticSubmissionRuns();
+  }
 
   get configured(): boolean {
     return isTikTokAppConfigured(this.config) && this.vault.available;
@@ -287,19 +302,38 @@ export class ApiRunner {
     }
 
     const priorByProduct = new Map<string, Set<string>>();
+    const historyVerifiedProductIds = new Set<string>();
     for (const product of products) {
       const prior = new Set(this.database.existingOpportunityIds(shopId, product.id));
       try {
-        const response = await this.readRequest(() =>
-          client.getSubmissionRecords({ product_id: product.id, page_size: 100 }),
-        );
-        for (const record of recordArrays(response.data)) {
-          const opportunityId = stringField(record, ["opportunity_id", "opportunityId"]);
-          if (opportunityId) prior.add(opportunityId);
+        let pageToken: string | undefined;
+        const seenPageTokens = new Set<string>();
+        while (true) {
+          const response = await this.readRequest(() =>
+            client.getSubmissionRecords({
+              product_id: product.id,
+              page_size: 100,
+              ...(pageToken ? { page_token: pageToken } : {}),
+            }),
+          );
+          for (const record of recordArrays(response.data)) {
+            const opportunityId = stringField(record, ["opportunity_id", "opportunityId"]);
+            if (opportunityId) prior.add(opportunityId);
+          }
+          const nextPageToken = extractNextPageToken(response.data)?.trim();
+          if (!nextPageToken) break;
+          if (seenPageTokens.has(nextPageToken)) {
+            throw new Error("历史提报记录分页标记重复");
+          }
+          seenPageTokens.add(nextPageToken);
+          pageToken = nextPageToken;
         }
+        historyVerifiedProductIds.add(product.id);
       } catch (error) {
         warnings.push(
-          `${product.id} 的历史提报记录读取失败：${error instanceof Error ? error.message : String(error)}`,
+          `${product.id} 的历史提报记录读取失败，因无法排除重复提报已跳过：${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
       priorByProduct.set(product.id, prior);
@@ -311,6 +345,11 @@ export class ApiRunner {
     for (const product of products) {
       const productMatches: ProductOpportunityMatch[] = [];
       const summaries = summariesByProduct.get(product.id) ?? new Map();
+      if (!historyVerifiedProductIds.has(product.id)) {
+        candidatePairCount += summaries.size;
+        blockedPairCount += summaries.size;
+        continue;
+      }
       for (const opportunityId of summaries.keys()) {
         candidatePairCount += 1;
         const opportunity = details.get(opportunityId);
@@ -479,21 +518,248 @@ export class ApiRunner {
     };
   }
 
+  startAutomaticSubmission(
+    shopId: string,
+    source: AutomaticSubmissionSource,
+  ): StartAutomaticSubmissionResult {
+    const shop = this.database.getShop(shopId);
+    if (!shop) throw new Error("店铺不存在");
+    if (source === "api" && (!this.configured || !shop.apiConfigured)) {
+      throw new Error("该店铺未配置可用的 TikTok API 凭证");
+    }
+
+    const result = this.database.createAutomaticSubmissionRun({ shopId, source });
+    if (!result.created) return result;
+
+    this.runningAutomaticSubmissions.add(result.run.id);
+    void this.runAutomaticSubmission(result.run.id, shopId, source)
+      .catch((error) => {
+        console.error("Automatic opportunity submission stopped unexpectedly", error);
+      })
+      .finally(() => this.runningAutomaticSubmissions.delete(result.run.id));
+    return result;
+  }
+
+  isAutomaticSubmissionRunning(runId: string): boolean {
+    return this.runningAutomaticSubmissions.has(runId);
+  }
+
+  private async listAllAutomaticProductIds(
+    runId: string,
+    shopId: string,
+    source: AutomaticSubmissionSource,
+  ): Promise<string[]> {
+    const productIds = new Set<string>();
+    if (source === "extension") {
+      const pageSize = 1_000;
+      let offset = 0;
+      while (true) {
+        const page = this.database.listCapturedProducts(shopId, pageSize, offset);
+        for (const product of page) productIds.add(product.id);
+        this.database.updateAutomaticSubmissionRun(runId, {
+          status: "scanning",
+          totalProducts: productIds.size,
+        });
+        if (page.length < pageSize) break;
+        offset += page.length;
+      }
+      return [...productIds];
+    }
+
+    let pageToken: string | undefined;
+    const seenPageTokens = new Set<string>();
+    while (true) {
+      const page = await this.listProducts(shopId, {
+        pageSize: 100,
+        ...(pageToken ? { pageToken } : {}),
+      });
+      for (const product of page.products) productIds.add(product.id);
+      this.database.updateAutomaticSubmissionRun(runId, {
+        status: "scanning",
+        totalProducts: productIds.size,
+      });
+      const nextPageToken = page.nextPageToken?.trim();
+      if (!nextPageToken) break;
+      if (seenPageTokens.has(nextPageToken)) {
+        throw new Error("TikTok 商品分页标记重复，已停止以避免无限扫描");
+      }
+      seenPageTokens.add(nextPageToken);
+      pageToken = nextPageToken;
+    }
+    return [...productIds];
+  }
+
+  private recordAutomaticMatchProgress(shopId: string, result: ProductMatchResult): void {
+    const matchCounts = new Map(result.products.map((product) => [product.id, 0]));
+    for (const match of result.matches) {
+      if (!isSafeMatch(match) || !matchCounts.has(match.product.id)) continue;
+      matchCounts.set(match.product.id, (matchCounts.get(match.product.id) ?? 0) + 1);
+    }
+    this.database.recordProductMatchResults(
+      shopId,
+      [...matchCounts].map(([productId, matchCount]) => ({ productId, matchCount })),
+    );
+  }
+
+  private async runAutomaticSubmission(
+    runId: string,
+    shopId: string,
+    source: AutomaticSubmissionSource,
+  ): Promise<void> {
+    await Promise.resolve();
+    const warnings = new Set<string>();
+    try {
+      this.database.updateAutomaticSubmissionRun(runId, { status: "scanning" });
+      const productIds = await this.listAllAutomaticProductIds(runId, shopId, source);
+      if (productIds.length === 0) {
+        this.database.updateAutomaticSubmissionRun(runId, {
+          status: "completed",
+          warnings: ["店铺没有可用于机会匹配的商品"],
+        });
+        return;
+      }
+
+      this.database.updateAutomaticSubmissionRun(runId, {
+        status: "matching",
+        totalProducts: productIds.length,
+      });
+      const pairs = new Map<string, { productId: string; opportunityId: string }>();
+      let processedProducts = 0;
+      let candidatePairs = 0;
+      let blockedPairs = 0;
+      let successfulChunks = 0;
+      let lastChunkError = "";
+      for (let offset = 0; offset < productIds.length; offset += 20) {
+        const chunk = productIds.slice(offset, offset + 20);
+        try {
+          const result = source === "api"
+            ? await this.matchProducts(shopId, chunk, DEFAULT_MATCH_STRATEGY)
+            : this.matchCapturedProducts(shopId, chunk, DEFAULT_MATCH_STRATEGY);
+          successfulChunks += 1;
+          this.recordAutomaticMatchProgress(shopId, result);
+          candidatePairs += result.candidatePairCount;
+          blockedPairs += result.blockedPairCount;
+          for (const warning of result.warnings) warnings.add(warning);
+          for (const match of result.matches) {
+            if (!isSafeMatch(match)) continue;
+            pairs.set(matchPairKey(match.product.id, match.opportunity.id), {
+              productId: match.product.id,
+              opportunityId: match.opportunity.id,
+            });
+          }
+        } catch (error) {
+          lastChunkError = error instanceof Error ? error.message : String(error);
+          warnings.add(
+            `第 ${Math.floor(offset / 20) + 1} 组商品匹配失败，已跳过：${lastChunkError}`,
+          );
+        }
+        processedProducts += chunk.length;
+        this.database.updateAutomaticSubmissionRun(runId, {
+          status: "matching",
+          processedProducts,
+          candidatePairs,
+          blockedPairs,
+          matchedPairs: pairs.size,
+          warnings: [...warnings],
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      if (successfulChunks === 0) {
+        throw new Error(`全部商品分组均匹配失败${lastChunkError ? `：${lastChunkError}` : ""}`);
+      }
+
+      this.database.updateAutomaticSubmissionRun(runId, {
+        status: "creating_batch",
+        processedProducts,
+        candidatePairs,
+        blockedPairs,
+        matchedPairs: pairs.size,
+        warnings: [...warnings],
+      });
+      if (pairs.size === 0) {
+        this.database.updateAutomaticSubmissionRun(runId, {
+          status: "completed",
+          warnings: [...warnings, "没有找到新的高置信度可提报组合"],
+        });
+        return;
+      }
+
+      const rows = [...pairs.values()].map((pair) => ({
+        shop_id: shopId,
+        product_id: pair.productId,
+        opportunity_id: pair.opportunityId,
+        channel: source,
+      }));
+      const validation = validateImportRows(rows, {
+        defaultShopId: shopId,
+        defaultChannel: source,
+      });
+      for (const invalid of validation.invalid) {
+        warnings.add(
+          `自动匹配结果第 ${invalid.sourceRow} 行无效：${invalid.issues
+            .map((issue) => issue.message)
+            .join("；")}`,
+        );
+      }
+      const timestamp = new Date().toISOString();
+      const batch = this.database.createBatch({
+        filename: `automatic-opportunity-matches-${timestamp.slice(0, 19).replaceAll(":", "-")}.json`,
+        source: "automatic-matching",
+        validRows: validation.valid,
+        invalidRows: validation.invalid.map((invalid) => ({
+          sourceRow: invalid.sourceRow,
+          issues: invalid.issues,
+        })),
+        totalRows: rows.length,
+      });
+      const batchStarted = source === "api" && batch.validRows > 0
+        ? this.startBatch(batch.id)
+        : false;
+      this.database.updateAutomaticSubmissionRun(runId, {
+        status: "completed",
+        batchId: batch.id,
+        batchStarted,
+        warnings: [...warnings],
+      });
+    } catch (error) {
+      this.database.updateAutomaticSubmissionRun(runId, {
+        status: "failed",
+        warnings: [...warnings],
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   startBatch(batchId: string): boolean {
-    // MVP deliberately runs one API queue globally to avoid accidental bursts
-    // when an operator starts several batches at once.
-    if (this.runningBatches.size > 0) return false;
+    if (this.runningBatches.has(batchId) || this.queuedBatchIds.has(batchId)) return false;
+    // Keep one global API runner to avoid bursts, but queue later batches so an
+    // accepted one-click run cannot be stranded behind an already-running batch.
+    if (this.runningBatches.size > 0) {
+      this.queuedBatchIds.add(batchId);
+      return true;
+    }
+    this.launchBatch(batchId);
+    return true;
+  }
+
+  private launchBatch(batchId: string): void {
     this.runningBatches.add(batchId);
     void this.runBatch(batchId)
       .catch((error) => {
         console.error("API batch runner stopped unexpectedly", error);
       })
-      .finally(() => this.runningBatches.delete(batchId));
-    return true;
+      .finally(() => {
+        this.runningBatches.delete(batchId);
+        const nextBatchId = this.queuedBatchIds.values().next().value as string | undefined;
+        if (!nextBatchId) return;
+        this.queuedBatchIds.delete(nextBatchId);
+        this.launchBatch(nextBatchId);
+      });
   }
 
   isBatchRunning(batchId: string): boolean {
-    return this.runningBatches.has(batchId);
+    return this.runningBatches.has(batchId) || this.queuedBatchIds.has(batchId);
   }
 
   private async runBatch(batchId: string): Promise<void> {

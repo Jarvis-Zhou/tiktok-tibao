@@ -673,3 +673,127 @@ test("imports extension snapshots, paginates all products and matches without AP
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("one-click submission scans more than twenty captured products and creates one safe batch", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-automatic-submission-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const vault = new TokenVault("");
+  const app = Fastify();
+  const config: AppConfig = {
+    host: "127.0.0.1",
+    port: 3210,
+    databasePath: join(directory, "queue.sqlite"),
+    publicDirectory: directory,
+    tiktokAppKey: "",
+    tiktokAppSecret: "",
+    tiktokApiBaseUrl: "https://example.test",
+    tiktokProductApiVersion: "202309",
+    tokenEncryptionKey: "",
+    extensionSharedKey: "extension-key",
+    apiMinIntervalMs: 1,
+    matchReadIntervalMs: 1,
+    apiMaxAttempts: 1,
+    taskLeaseMinutes: 30,
+  };
+  const runner = new ApiRunner(config, database, vault);
+
+  try {
+    const shop = database.createShop({ name: "Automatic extension shop" });
+    const capturedAt = new Date().toISOString();
+    const products = Array.from({ length: 25 }, (_, index) => ({
+      id: `automatic-product-${String(index).padStart(2, "0")}`,
+      title: `Organizador de cocina Acme ${index}`,
+      status: "LIVE",
+      categoryIds: ["601234"],
+      categoryNames: ["Organizadores de cocina"],
+      brandName: "Acme",
+      keywords: ["organizador", "cocina"],
+      attributes: ["material: acero"],
+      price: 299,
+      currency: "MXN",
+      stock: 10,
+    }));
+    database.upsertCapturedProducts({
+      shopId: shop.id,
+      sourceUrl: "https://seller.tiktokshopglobalselling.com/product/manage?shop_region=MX",
+      capturedAt,
+      products,
+    });
+    database.upsertCapturedOpportunities({
+      shopId: shop.id,
+      sourceUrl: "https://seller.tiktokshopglobalselling.com/opportunities?shop_region=MX",
+      capturedAt,
+      opportunities: [
+        {
+          id: "automatic-opportunity-1",
+          title: "Organización de cocina Acme",
+          type: "CATEGORY",
+          requirementsVerified: true,
+          status: "ACTIVE",
+          active: true,
+          expired: false,
+          fulfilled: false,
+          categoryIds: ["601234"],
+          categoryNames: ["Organizadores de cocina"],
+          brandNames: ["Acme"],
+          keywords: ["organizador", "cocina"],
+          allowedProductStatuses: ["LIVE"],
+          referencePrice: 300,
+          minPrice: 200,
+          maxPrice: 400,
+          currency: "MXN",
+        },
+      ],
+    });
+    await registerRoutes(app, { config, database, vault, runner });
+
+    const unconfirmed = await app.inject({
+      method: "POST",
+      url: "/api/automatic-submissions",
+      payload: { shopId: shop.id },
+    });
+    assert.equal(unconfirmed.statusCode, 400);
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/automatic-submissions",
+      payload: { shopId: shop.id, source: "auto", confirmed: true },
+    });
+    assert.equal(started.statusCode, 202);
+    assert.equal(started.json().created, true);
+    const runId = String(started.json().run.id);
+
+    let run = database.getAutomaticSubmissionRun(runId);
+    for (let attempt = 0; attempt < 100 && run?.status !== "completed"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      run = database.getAutomaticSubmissionRun(runId);
+    }
+    assert.equal(run?.status, "completed");
+    assert.equal(run?.source, "extension");
+    assert.equal(run?.totalProducts, 25);
+    assert.equal(run?.processedProducts, 25);
+    assert.equal(run?.candidatePairs, 25);
+    assert.equal(run?.blockedPairs, 0);
+    assert.equal(run?.matchedPairs, 25);
+    assert.ok(run?.batchId);
+    assert.equal(run?.batchStarted, false);
+    assert.equal(database.listTasks({ batchId: run?.batchId ?? "" }).length, 25);
+
+    const latest = await app.inject({
+      method: "GET",
+      url: `/api/shops/${shop.id}/automatic-submissions/latest`,
+    });
+    assert.equal(latest.statusCode, 200);
+    assert.equal(latest.json().run.id, runId);
+    const detail = await app.inject({
+      method: "GET",
+      url: `/api/automatic-submissions/${runId}`,
+    });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(detail.json().run.batchId, run?.batchId);
+  } finally {
+    await app.close();
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

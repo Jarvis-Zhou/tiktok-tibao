@@ -312,3 +312,51 @@ test("migrates previously captured product rows without losing their category na
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("persists one active automatic submission per shop and recovers interrupted work", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-automatic-run-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  try {
+    const shop = database.createShop({ name: "Automatic test shop" });
+    const first = database.createAutomaticSubmissionRun({
+      shopId: shop.id,
+      source: "extension",
+    });
+    assert.equal(first.created, true);
+    const duplicate = database.createAutomaticSubmissionRun({
+      shopId: shop.id,
+      source: "extension",
+    });
+    assert.equal(duplicate.created, false);
+    assert.equal(duplicate.run.id, first.run.id);
+
+    const matching = database.updateAutomaticSubmissionRun(first.run.id, {
+      status: "matching",
+      totalProducts: 42,
+      processedProducts: 20,
+      candidatePairs: 60,
+      blockedPairs: 55,
+      matchedPairs: 5,
+      warnings: ["warning-one", "warning-one"],
+    });
+    assert.equal(matching?.processedProducts, 20);
+    assert.deepEqual(matching?.warnings, ["warning-one"]);
+    assert.equal(database.getLatestAutomaticSubmissionRun(shop.id)?.id, first.run.id);
+
+    assert.equal(database.failInterruptedAutomaticSubmissionRuns(), 1);
+    const interrupted = database.getAutomaticSubmissionRun(first.run.id);
+    assert.equal(interrupted?.status, "failed");
+    assert.match(interrupted?.errorMessage ?? "", /服务重启/);
+    assert.ok(interrupted?.completedAt);
+
+    const restarted = database.createAutomaticSubmissionRun({
+      shopId: shop.id,
+      source: "extension",
+    });
+    assert.equal(restarted.created, true);
+    assert.notEqual(restarted.run.id, first.run.id);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

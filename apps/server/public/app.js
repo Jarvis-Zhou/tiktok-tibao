@@ -7,9 +7,17 @@ const state = {
   nextProductPageToken: null,
   productSource: null,
   selectedProductIds: new Set(),
+  automaticSubmissionRun: null,
 };
 
 const MAX_PRODUCTS_PER_MATCH = 20;
+const ACTIVE_AUTOMATIC_SUBMISSION_STATUSES = new Set([
+  "queued",
+  "scanning",
+  "matching",
+  "creating_batch",
+]);
+let automaticSubmissionPollTimer = null;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -110,6 +118,11 @@ async function loadShops() {
     select.innerHTML = options.html;
     select.value = options.value;
   }
+  renderAutomaticSubmission(
+    state.automaticSubmissionRun?.shopId === $("#match-shop-select").value
+      ? state.automaticSubmissionRun
+      : null,
+  );
 }
 
 function countLabel(counts) {
@@ -281,6 +294,136 @@ async function loadProducts(append = false, { quiet = false } = {}) {
     const sourceLabel = result.source === "extension" ? "插件快照" : "官方 API";
     toast(`已从${sourceLabel}读取 ${state.products.length} 个商品${state.nextProductPageToken ? "，还有下一页" : ""}`);
   }
+}
+
+function automaticSubmissionIsActive(run) {
+  return Boolean(run && ACTIVE_AUTOMATIC_SUBMISSION_STATUSES.has(run.status));
+}
+
+function renderAutomaticSubmission(run) {
+  state.automaticSubmissionRun = run;
+  const progress = $("#auto-submit-progress");
+  const button = $("#auto-submit");
+  button.disabled = !$("#match-shop-select").value || automaticSubmissionIsActive(run);
+  if (!run) {
+    progress.hidden = true;
+    progress.className = "automatic-submit-progress";
+    progress.innerHTML = "";
+    return;
+  }
+
+  const statusLabels = {
+    queued: "已进入准备队列",
+    scanning: "正在读取全部商品",
+    matching: "正在严格匹配机会",
+    creating_batch: "正在创建提报批次",
+    completed: "自动匹配已完成",
+    failed: "自动提报准备失败",
+  };
+  const sourceLabel = run.source === "api" ? "A · 官方 API" : "C · Chrome 插件";
+  const productProgress = run.totalProducts > 0
+    ? `${run.processedProducts} / ${run.totalProducts} 个商品`
+    : "正在统计商品";
+  let outcome = "";
+  if (run.status === "completed") {
+    if (run.batchId && run.source === "api" && run.batchStarted) {
+      outcome = `批次 ${run.batchId} 已加入 API 提报队列。`;
+    } else if (run.batchId && run.source === "extension") {
+      outcome = `批次 ${run.batchId} 已生成，请保持 Chrome 插件运行以执行 C 通道任务。`;
+    } else if (run.batchId) {
+      outcome = `批次 ${run.batchId} 已创建，可在批次区手动启动。`;
+    } else {
+      outcome = "本轮没有新的高置信度组合需要提报。";
+    }
+  } else if (run.status === "failed") {
+    outcome = run.errorMessage || "请查看服务日志后重试。";
+  }
+  const warningText = Array.isArray(run.warnings) && run.warnings.length > 0
+    ? `<code>提示：${run.warnings.slice(-3).map(escapeHtml).join("；")}</code>`
+    : "";
+  progress.hidden = false;
+  progress.className = `automatic-submit-progress${run.status === "failed" ? " failed" : ""}`;
+  progress.innerHTML = `<strong>${escapeHtml(statusLabels[run.status] || run.status)} · ${escapeHtml(sourceLabel)}</strong><span>${escapeHtml(productProgress)} · 候选组合 ${run.candidatePairs} · 安全拦截 ${run.blockedPairs} · 可提报 ${run.matchedPairs}</span>${outcome ? `<code>${escapeHtml(outcome)}</code>` : ""}${warningText}`;
+}
+
+function stopAutomaticSubmissionPolling() {
+  if (automaticSubmissionPollTimer !== null) {
+    clearTimeout(automaticSubmissionPollTimer);
+    automaticSubmissionPollTimer = null;
+  }
+}
+
+async function finishAutomaticSubmission(run) {
+  if (run.batchId) {
+    await loadBatches();
+    $("#batch-filter").value = run.batchId;
+    await loadTasks();
+  }
+  if (state.products.length > 0 && $("#match-shop-select").value === run.shopId) {
+    await loadProducts(false, { quiet: true });
+  }
+  toast(
+    run.status === "failed"
+      ? `一键自动提报失败：${run.errorMessage || "未知错误"}`
+      : run.batchId
+        ? `一键处理完成：${run.matchedPairs} 个安全组合已进入提报批次`
+        : "一键处理完成：没有新的安全组合需要提报",
+    run.status === "failed",
+  );
+}
+
+async function pollAutomaticSubmission(runId) {
+  stopAutomaticSubmissionPolling();
+  const tick = async () => {
+    try {
+      const previous = state.automaticSubmissionRun;
+      const result = await api(`/api/automatic-submissions/${encodeURIComponent(runId)}`);
+      if ($("#match-shop-select").value !== result.run.shopId) return;
+      renderAutomaticSubmission(result.run);
+      if (automaticSubmissionIsActive(result.run)) {
+        automaticSubmissionPollTimer = setTimeout(tick, 1_000);
+      } else if (previous?.id === runId && automaticSubmissionIsActive(previous)) {
+        await finishAutomaticSubmission(result.run);
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), true);
+      automaticSubmissionPollTimer = setTimeout(tick, 3_000);
+    }
+  };
+  await tick();
+}
+
+async function loadLatestAutomaticSubmission() {
+  stopAutomaticSubmissionPolling();
+  const shopId = $("#match-shop-select").value;
+  if (!shopId) {
+    renderAutomaticSubmission(null);
+    return;
+  }
+  const result = await api(
+    `/api/shops/${encodeURIComponent(shopId)}/automatic-submissions/latest`,
+  );
+  renderAutomaticSubmission(result.run);
+  if (automaticSubmissionIsActive(result.run)) {
+    await pollAutomaticSubmission(result.run.id);
+  }
+}
+
+async function startAutomaticSubmission() {
+  const shopId = $("#match-shop-select").value;
+  if (!shopId) throw new Error("请先选择店铺");
+  const result = await api("/api/automatic-submissions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      shopId,
+      source: state.productSource || "auto",
+      confirmed: true,
+    }),
+  });
+  renderAutomaticSubmission(result.run);
+  toast(result.created ? "已开始扫描全店商品并自动匹配" : "该店铺已有自动任务，已恢复进度");
+  await pollAutomaticSubmission(result.run.id);
 }
 
 async function selectNextPendingProducts() {
@@ -462,7 +605,7 @@ async function createMatchedBatch() {
 
 async function refresh() {
   await Promise.all([loadHealth(), loadShops(), loadBatches()]);
-  await loadTasks();
+  await Promise.all([loadTasks(), loadLatestAutomaticSubmission()]);
 }
 
 $("#shop-form").addEventListener("submit", async (event) => {
@@ -523,6 +666,7 @@ $("#match-select-all").addEventListener("change", (event) => {
   syncMatchSelectionState();
 });
 $("#match-shop-select").addEventListener("change", () => {
+  stopAutomaticSubmissionPolling();
   state.products = [];
   state.matches = [];
   state.nextProductPageToken = null;
@@ -533,6 +677,9 @@ $("#match-shop-select").addEventListener("change", () => {
   $("#product-progress-filter").value = "all";
   $("#match-results").hidden = true;
   renderProducts();
+  renderAutomaticSubmission(null);
+  void loadLatestAutomaticSubmission().catch((error) =>
+    toast(error instanceof Error ? error.message : String(error), true));
 });
 $("#match-channel").addEventListener("change", () => {
   const isApi = $("#match-channel").value === "api";
@@ -575,6 +722,8 @@ document.addEventListener("click", async (event) => {
       await loadProducts(true);
     } else if (button.id === "select-next-pending") {
       await selectNextPendingProducts();
+    } else if (button.id === "auto-submit") {
+      await startAutomaticSubmission();
     } else if (button.id === "match-products") {
       await matchSelectedProducts();
     } else if (button.id === "create-video-from-product") {
@@ -611,7 +760,9 @@ document.addEventListener("click", async (event) => {
   } catch (error) {
     toast(error instanceof Error ? error.message : String(error), true);
   } finally {
-    button.disabled = false;
+    button.disabled = button.id === "auto-submit"
+      ? automaticSubmissionIsActive(state.automaticSubmissionRun)
+      : false;
   }
 });
 

@@ -209,6 +209,208 @@ test("excludes opportunities when the detail request fails", async () => {
   }
 });
 
+test("fails closed when platform submission history cannot be verified", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-match-history-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const vault = new TokenVault("a-test-key-that-is-long-enough");
+  const originalFetch = globalThis.fetch;
+  const config = testConfig(directory);
+
+  try {
+    const shop = database.createShop({
+      name: "MX history test",
+      shopCipher: "cipher-history",
+      encryptedAccessToken: vault.encrypt("access-token"),
+    });
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/products/product-1")) {
+        return response({
+          product: {
+            id: "product-1",
+            title: "Audífonos Bluetooth Acme",
+            status: "ACTIVATE",
+            category: { id: "11", name: "Audífonos" },
+            brand: { name: "Acme" },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/opportunities/query")) {
+        return response({
+          opportunities: [
+            {
+              opportunity_id: "opp-1",
+              title: "Audífonos Bluetooth",
+              opportunity_type: "KEYWORD",
+              status: "ACTIVE",
+              listing_criteria: { category_ids: ["11"] },
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/opportunities/opp-1")) {
+        return response({
+          opportunity: {
+            id: "opp-1",
+            title: "Audífonos Bluetooth",
+            opportunity_type: "KEYWORD",
+            status: "ACTIVE",
+            listing_criteria: {
+              category_ids: ["11"],
+              brand: { name: "Acme" },
+              keywords: ["audífonos", "bluetooth"],
+              product_statuses: ["ACTIVATE"],
+            },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/opportunities/submissions")) {
+        throw new Error("history unavailable");
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    };
+
+    const result = await new ApiRunner(config, database, vault).matchProducts(shop.id, [
+      "product-1",
+    ]);
+    assert.equal(result.candidatePairCount, 1);
+    assert.equal(result.blockedPairCount, 1);
+    assert.equal(result.matches.length, 0);
+    assert.match(result.warnings.join(" "), /历史提报记录读取失败.*已跳过/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("one-click API submission follows every product page before chunked matching", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-automatic-api-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const vault = new TokenVault("a-test-key-that-is-long-enough");
+  const originalFetch = globalThis.fetch;
+  const config = testConfig(directory);
+  const searchedPageTokens: Array<string | null> = [];
+
+  class QueueOnlyApiRunner extends ApiRunner {
+    override startBatch(_batchId: string): boolean {
+      return true;
+    }
+  }
+
+  try {
+    const shop = database.createShop({
+      name: "MX automatic API shop",
+      shopCipher: "cipher-automatic-api",
+      encryptedAccessToken: vault.encrypt("access-token"),
+    });
+    const products = Array.from({ length: 25 }, (_, index) => ({
+      id: `api-product-${String(index).padStart(2, "0")}`,
+      title: `Audífonos Bluetooth Acme ${index}`,
+      status: "ACTIVATE",
+      category: { id: "11", name: "Audífonos" },
+      brand: { name: "Acme" },
+      price: { amount: 399, currency: "MXN" },
+    }));
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/products/search")) {
+        const pageToken = url.searchParams.get("page_token");
+        searchedPageTokens.push(pageToken);
+        return pageToken === "page-2"
+          ? response({ products: products.slice(20) })
+          : response({ products: products.slice(0, 20), next_page_token: "page-2" });
+      }
+      if (url.pathname.includes("/products/api-product-")) {
+        const productId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+        const product = products.find((item) => item.id === productId);
+        if (!product) throw new Error(`Unknown product: ${productId}`);
+        return response({ product });
+      }
+      if (url.pathname.endsWith("/opportunities/query")) {
+        return response({
+          opportunities: [
+            {
+              opportunity_id: "automatic-api-opportunity",
+              title: "Audífonos Bluetooth Acme",
+              opportunity_type: "KEYWORD",
+              status: "ACTIVE",
+              listing_criteria: {
+                category_ids: ["11"],
+                brand: { name: "Acme" },
+              },
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/opportunities/automatic-api-opportunity")) {
+        return response({
+          opportunity: {
+            id: "automatic-api-opportunity",
+            title: "Audífonos Bluetooth Acme",
+            opportunity_type: "KEYWORD",
+            status: "ACTIVE",
+            listing_criteria: {
+              category_ids: ["11"],
+              brand: { name: "Acme" },
+              keywords: ["audífonos", "bluetooth"],
+              product_statuses: ["ACTIVATE"],
+            },
+            reference_price: { amount: 410, currency: "MXN" },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/opportunities/submissions")) {
+        return response({ submissions: [] });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    };
+
+    const runner = new QueueOnlyApiRunner(config, database, vault);
+    const started = runner.startAutomaticSubmission(shop.id, "api");
+    assert.equal(started.created, true);
+    let run = database.getAutomaticSubmissionRun(started.run.id);
+    for (let attempt = 0; attempt < 500 && run?.status !== "completed"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      run = database.getAutomaticSubmissionRun(started.run.id);
+    }
+    assert.equal(run?.status, "completed");
+    assert.deepEqual(searchedPageTokens, [null, "page-2"]);
+    assert.equal(run?.totalProducts, 25);
+    assert.equal(run?.processedProducts, 25);
+    assert.equal(run?.matchedPairs, 25);
+    assert.equal(run?.batchStarted, true);
+    assert.equal(database.listTasks({ batchId: run?.batchId ?? "" }).length, 25);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("accepts a later API batch into the single-runner queue", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-api-batch-queue-test-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const runner = new ApiRunner(
+    testConfig(directory),
+    database,
+    new TokenVault("a-test-key-that-is-long-enough"),
+  );
+  try {
+    assert.equal(runner.startBatch("batch-one"), true);
+    assert.equal(runner.startBatch("batch-two"), true);
+    assert.equal(runner.isBatchRunning("batch-two"), true);
+    for (let attempt = 0; attempt < 100 && runner.isBatchRunning("batch-two"); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    assert.equal(runner.isBatchRunning("batch-one"), false);
+    assert.equal(runner.isBatchRunning("batch-two"), false);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("pauses an API task before submission when fresh details do not match", async () => {
   const directory = mkdtempSync(join(tmpdir(), "tibao-pre-submit-test-"));
   const database = new TibaoDatabase(join(directory, "queue.sqlite"));

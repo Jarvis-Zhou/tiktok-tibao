@@ -45,6 +45,47 @@ export interface CreateBatchResult extends BatchSummary {
   invalidDetails: Array<{ sourceRow: number; issues: ImportIssue[] }>;
 }
 
+export type AutomaticSubmissionSource = "api" | "extension";
+export type AutomaticSubmissionStatus =
+  | "queued"
+  | "scanning"
+  | "matching"
+  | "creating_batch"
+  | "completed"
+  | "failed";
+
+export interface AutomaticSubmissionRun {
+  id: string;
+  shopId: string;
+  source: AutomaticSubmissionSource;
+  status: AutomaticSubmissionStatus;
+  totalProducts: number;
+  processedProducts: number;
+  candidatePairs: number;
+  blockedPairs: number;
+  matchedPairs: number;
+  batchId: string | null;
+  batchStarted: boolean;
+  warnings: string[];
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface AutomaticSubmissionRunUpdate {
+  status?: AutomaticSubmissionStatus;
+  totalProducts?: number;
+  processedProducts?: number;
+  candidatePairs?: number;
+  blockedPairs?: number;
+  matchedPairs?: number;
+  batchId?: string | null;
+  batchStarted?: boolean;
+  warnings?: string[];
+  errorMessage?: string | null;
+}
+
 export interface TaskFilters {
   batchId?: string;
   status?: TaskStatus;
@@ -141,6 +182,27 @@ function stringArray(value: unknown, fallback: string[] = []): string[] {
   } catch {
     return fallback;
   }
+}
+
+function automaticSubmissionRunFromRow(row: SqlRow): AutomaticSubmissionRun {
+  return {
+    id: String(row.id),
+    shopId: String(row.shop_id),
+    source: String(row.source) as AutomaticSubmissionSource,
+    status: String(row.status) as AutomaticSubmissionStatus,
+    totalProducts: Number(row.total_products),
+    processedProducts: Number(row.processed_products),
+    candidatePairs: Number(row.candidate_pairs),
+    blockedPairs: Number(row.blocked_pairs),
+    matchedPairs: Number(row.matched_pairs),
+    batchId: row.batch_id === null ? null : String(row.batch_id),
+    batchStarted: Boolean(row.batch_started),
+    warnings: stringArray(row.warnings_json),
+    errorMessage: row.error_message === null ? null : String(row.error_message),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    completedAt: row.completed_at === null ? null : String(row.completed_at),
+  };
 }
 
 function capturedProductFromRow(row: SqlRow): CapturedProduct {
@@ -292,6 +354,27 @@ export class TibaoDatabase {
         PRIMARY KEY(shop_id, product_id)
       );
 
+      CREATE TABLE IF NOT EXISTS automatic_submission_runs (
+        id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK(source IN ('api', 'extension')),
+        status TEXT NOT NULL CHECK(status IN (
+          'queued', 'scanning', 'matching', 'creating_batch', 'completed', 'failed'
+        )),
+        total_products INTEGER NOT NULL DEFAULT 0 CHECK(total_products >= 0),
+        processed_products INTEGER NOT NULL DEFAULT 0 CHECK(processed_products >= 0),
+        candidate_pairs INTEGER NOT NULL DEFAULT 0 CHECK(candidate_pairs >= 0),
+        blocked_pairs INTEGER NOT NULL DEFAULT 0 CHECK(blocked_pairs >= 0),
+        matched_pairs INTEGER NOT NULL DEFAULT 0 CHECK(matched_pairs >= 0),
+        batch_id TEXT REFERENCES batches(id) ON DELETE SET NULL,
+        batch_started INTEGER NOT NULL DEFAULT 0,
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS oauth_states (
         state_hash TEXT PRIMARY KEY,
         expires_at TEXT NOT NULL,
@@ -347,6 +430,11 @@ export class TibaoDatabase {
       CREATE INDEX IF NOT EXISTS idx_tasks_channel_status ON tasks(channel, status, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(status, lease_expires_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_shop_product ON tasks(shop_id, product_id, status);
+      CREATE INDEX IF NOT EXISTS idx_automatic_submission_runs_shop_created
+        ON automatic_submission_runs(shop_id, created_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_automatic_submission_runs_shop_active
+        ON automatic_submission_runs(shop_id)
+        WHERE status IN ('queued', 'scanning', 'matching', 'creating_batch');
       CREATE INDEX IF NOT EXISTS idx_oauth_states_expiry ON oauth_states(expires_at);
       CREATE INDEX IF NOT EXISTS idx_captured_products_updated
         ON captured_products(shop_id, updated_at DESC);
@@ -650,6 +738,128 @@ export class TibaoDatabase {
       )
       .get(shopId, opportunityId) as SqlRow | undefined;
     return row ? capturedOpportunityFromRow(row) : null;
+  }
+
+  createAutomaticSubmissionRun(input: {
+    shopId: string;
+    source: AutomaticSubmissionSource;
+  }): { run: AutomaticSubmissionRun; created: boolean } {
+    const active = this.getActiveAutomaticSubmissionRun(input.shopId);
+    if (active) return { run: active, created: false };
+
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.raw
+      .prepare(`
+        INSERT INTO automatic_submission_runs (
+          id, shop_id, source, status, created_at, updated_at
+        ) VALUES (?, ?, ?, 'queued', ?, ?)
+      `)
+      .run(id, input.shopId, input.source, timestamp, timestamp);
+    const run = this.getAutomaticSubmissionRun(id);
+    if (!run) throw new Error("一键自动提报任务创建失败");
+    return { run, created: true };
+  }
+
+  getAutomaticSubmissionRun(id: string): AutomaticSubmissionRun | null {
+    const row = this.raw
+      .prepare("SELECT * FROM automatic_submission_runs WHERE id = ?")
+      .get(id) as SqlRow | undefined;
+    return row ? automaticSubmissionRunFromRow(row) : null;
+  }
+
+  getActiveAutomaticSubmissionRun(shopId: string): AutomaticSubmissionRun | null {
+    const row = this.raw
+      .prepare(`
+        SELECT * FROM automatic_submission_runs
+        WHERE shop_id = ? AND status IN ('queued', 'scanning', 'matching', 'creating_batch')
+        ORDER BY created_at DESC LIMIT 1
+      `)
+      .get(shopId) as SqlRow | undefined;
+    return row ? automaticSubmissionRunFromRow(row) : null;
+  }
+
+  getLatestAutomaticSubmissionRun(shopId: string): AutomaticSubmissionRun | null {
+    const row = this.raw
+      .prepare(`
+        SELECT * FROM automatic_submission_runs
+        WHERE shop_id = ?
+        ORDER BY created_at DESC LIMIT 1
+      `)
+      .get(shopId) as SqlRow | undefined;
+    return row ? automaticSubmissionRunFromRow(row) : null;
+  }
+
+  updateAutomaticSubmissionRun(
+    id: string,
+    input: AutomaticSubmissionRunUpdate,
+  ): AutomaticSubmissionRun | null {
+    const assignments: string[] = [];
+    const values: Array<string | number | null> = [];
+    const addCount = (column: string, value: number | undefined): void => {
+      if (value === undefined) return;
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`${column} 必须是非负整数`);
+      }
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (input.status !== undefined) {
+      assignments.push("status = ?");
+      values.push(input.status);
+    }
+    addCount("total_products", input.totalProducts);
+    addCount("processed_products", input.processedProducts);
+    addCount("candidate_pairs", input.candidatePairs);
+    addCount("blocked_pairs", input.blockedPairs);
+    addCount("matched_pairs", input.matchedPairs);
+    if (input.batchId !== undefined) {
+      assignments.push("batch_id = ?");
+      values.push(input.batchId);
+    }
+    if (input.batchStarted !== undefined) {
+      assignments.push("batch_started = ?");
+      values.push(input.batchStarted ? 1 : 0);
+    }
+    if (input.warnings !== undefined) {
+      const warnings = [...new Set(input.warnings.map((warning) => warning.trim()).filter(Boolean))]
+        .slice(0, 200)
+        .map((warning) => warning.slice(0, 1_000));
+      assignments.push("warnings_json = ?");
+      values.push(JSON.stringify(warnings));
+    }
+    if (input.errorMessage !== undefined) {
+      assignments.push("error_message = ?");
+      values.push(input.errorMessage?.slice(0, 4_000) ?? null);
+    }
+    const timestamp = nowIso();
+    if (input.status === "completed" || input.status === "failed") {
+      assignments.push("completed_at = ?");
+      values.push(timestamp);
+    }
+    if (assignments.length === 0) return this.getAutomaticSubmissionRun(id);
+    assignments.push("updated_at = ?");
+    values.push(timestamp, id);
+    this.raw
+      .prepare(`UPDATE automatic_submission_runs SET ${assignments.join(", ")} WHERE id = ?`)
+      .run(...values);
+    return this.getAutomaticSubmissionRun(id);
+  }
+
+  failInterruptedAutomaticSubmissionRuns(): number {
+    const timestamp = nowIso();
+    const result = this.raw
+      .prepare(`
+        UPDATE automatic_submission_runs
+        SET status = 'failed',
+            error_message = '服务重启导致自动提报准备中断，请重新触发',
+            updated_at = ?,
+            completed_at = ?
+        WHERE status IN ('queued', 'scanning', 'matching', 'creating_batch')
+      `)
+      .run(timestamp, timestamp);
+    return Number(result.changes);
   }
 
   createBatch(input: {
