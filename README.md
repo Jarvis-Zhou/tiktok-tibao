@@ -151,11 +151,11 @@ http://127.0.0.1:3210/video-studio/
 
 工作台支持粘贴参考视频链接，或选择不超过 150 MB 的本地 MP4，并上传 PNG、JPG 或 WebP 商品图片。Alpha 的稳定路径是本地上传：URL 只做合法性与预览降级，服务不会绕过平台规则下载 TikTok 媒体。
 
-Phase A 后端骨架已经接入工作台：项目、素材校验和、私有本地存储、Job/Step、租约、事件、幂等、ETag、额度预占与 3–6 镜 Storyboard 都使用真实 SQLite 状态。当前 Provider 是 deterministic fake adapter，用于独立验证完整控制面；它不会调用外部模型，也不会生成 MP4。工作台刷新/轮询读取服务端 Job 阶段，不再使用模拟进度。
+Phase A 后端骨架已经接入工作台：项目、素材校验和、私有本地存储、Job/Step、租约、事件、幂等、ETag、额度预占与 3–6 镜 Storyboard 都使用真实 SQLite 状态。Phase B 当前已接入真实 FFprobe/FFmpeg 探测、抽帧和无音轨降级，正式版本化 Schema、最多两次结构修复、逐镜图片 Job/QC/锁定/局部重做，以及 draft/final Prompt ZIP（含 Manifest 文件哈希）。AI Provider 仍是 deterministic fake adapter，便于独立验证控制面；它不会调用外部模型，也不会生成 MP4。
 
 视频接口统一位于 `/api/video/v1`。素材写入 `VIDEO_STORAGE_ROOT`，临时上传写入 `VIDEO_TEMP_ROOT`，两个目录都在静态站点目录之外；SQLite 模式只允许 `VIDEO_WORKER_MODE=embedded`。开发重启时 runtime 会先停止领取作业、取消可中止工作并释放未提交 Provider 的租约与额度，再关闭数据库。
 
-功能基线见 [`docs/video-prd.md`](docs/video-prd.md)，后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。V1 的正式产物是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出；真实 FFmpeg/ASR/VLM/LLM、单镜 QC 与 Prompt 包导出属于 Phase B。
+功能基线见 [`docs/video-prd.md`](docs/video-prd.md)，后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。V1 的正式产物是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出；ASR/VLM/LLM 的真实供应商凭据和适配器仍待配置，相关接口与失败边界已经预留。
 
 ## 验证命令
 

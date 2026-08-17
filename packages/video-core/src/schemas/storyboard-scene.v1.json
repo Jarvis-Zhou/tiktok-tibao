@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tibao.local/schemas/storyboard-scene.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scene_id", "adapted_scene_id", "source_shot_ids", "input_fact_refs", "start_sec", "end_sec", "purpose", "headline", "overlay_text", "voiceover", "image_prompt", "video_prompt", "negative_prompt", "storyboard_asset_id"],
+  "properties": {
+    "schema_version": { "const": "1.0" }, "scene_id": { "type": "string", "minLength": 1 }, "adapted_scene_id": { "type": "string", "minLength": 1 },
+    "source_shot_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "input_fact_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "start_sec": { "type": "number", "minimum": 0, "multipleOf": 0.01 }, "end_sec": { "type": "number", "minimum": 0, "multipleOf": 0.01 },
+    "purpose": { "type": "string", "minLength": 1 }, "headline": { "type": "string", "minLength": 1 }, "overlay_text": { "type": "string" },
+    "voiceover": { "type": "string" }, "image_prompt": { "type": "string", "minLength": 1 }, "video_prompt": { "type": "string", "minLength": 1 },
+    "negative_prompt": { "type": "string", "minLength": 1 }, "storyboard_asset_id": { "type": ["string", "null"] }
+  }
+}

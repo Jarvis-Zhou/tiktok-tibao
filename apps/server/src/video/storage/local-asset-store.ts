@@ -1,12 +1,18 @@
 import { createHash, createHmac } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { VideoDomainError } from "@tibao/video-core";
 
 export interface StoredUpload {
   tempKey: string;
+  bytes: number;
+  sha256: string;
+}
+
+export interface StoredGeneratedAsset {
+  storageKey: string;
   bytes: number;
   sha256: string;
 }
@@ -125,8 +131,44 @@ export class LocalVideoAssetStore {
     return createReadStream(this.resolveStorage(storageKey));
   }
 
+  tempPath(tempKey: string): string {
+    return this.resolveTemp(tempKey);
+  }
+
+  storagePath(storageKey: string): string {
+    return this.resolveStorage(storageKey);
+  }
+
   async size(storageKey: string): Promise<number> {
     return (await stat(this.resolveStorage(storageKey))).size;
+  }
+
+  async read(storageKey: string): Promise<Buffer> {
+    return readFile(this.resolveStorage(storageKey));
+  }
+
+  async putGenerated(ownerId: string, data: Buffer): Promise<StoredGeneratedAsset> {
+    const sha256 = createHash("sha256").update(data).digest("hex");
+    const ownerNamespace = createHmac(
+      "sha256",
+      this.namespaceKey || "tibao-video-local-owner-namespace",
+    )
+      .update(ownerId, "utf8")
+      .digest("hex");
+    const storageKey = join("owners", ownerNamespace, sha256);
+    const destination = this.resolveStorage(storageKey);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    let handle;
+    try {
+      handle = await open(destination, "wx", 0o600);
+      await handle.writeFile(data);
+      await handle.sync();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    } finally {
+      await handle?.close();
+    }
+    return { storageKey: storageKey.split(sep).join("/"), bytes: data.length, sha256 };
   }
 
   async discardTemp(tempKey: string): Promise<void> {

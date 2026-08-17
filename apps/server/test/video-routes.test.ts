@@ -9,6 +9,19 @@ import { loadVideoConfig } from "../src/config.js";
 import { TibaoDatabase } from "../src/database.js";
 import { SqliteVideoRepository } from "../src/video/repository/sqlite-video-repository.js";
 import { registerVideoRoutes } from "../src/video/routes.js";
+import type { MediaToolchain } from "../src/video/media/ffmpeg-media-toolchain.js";
+
+const fakeMediaToolchain: MediaToolchain = {
+  async probeVideo() {
+    return { durationSec: 15, width: 1080, height: 1920, fps: 30, videoCodec: "h264", hasAudio: false, audioCodec: null };
+  },
+  async probeImage() {
+    return { width: 800, height: 800, codec: "png" };
+  },
+  async prepareSource(_path, _workspaceId, probe) {
+    return { probe, framePaths: [], contactSheetPath: null, audioPath: null, cleanup: async () => undefined };
+  },
+};
 
 function configFor(directory: string): AppConfig {
   return {
@@ -76,7 +89,7 @@ test("Phase A API persists uploads and completes a fake-provider storyboard job"
   const config = configFor(directory);
   const database = new TibaoDatabase(config.databasePath);
   const app = Fastify({ bodyLimit: 6 * 1024 * 1024 });
-  const module = await registerVideoRoutes(app, { config, database });
+  const module = await registerVideoRoutes(app, { config, database, mediaToolchain: fakeMediaToolchain });
   assert.ok(module);
 
   try {
@@ -166,7 +179,7 @@ test("Phase A API persists uploads and completes a fake-provider storyboard job"
     assert.match(scenes.json().scenes[2].headline, /Portable Blender/);
 
     const finished = await app.inject({ method: "GET", url: `/api/video/v1/projects/${projectId}` });
-    assert.equal(finished.json().project.status, "storyboard_ready");
+    assert.equal(finished.json().project.status, "adaptation_ready");
     assert.equal(finished.json().jobs[0].status, "succeeded");
 
     const updated = await app.inject({
@@ -220,6 +233,166 @@ test("Phase A API persists uploads and completes a fake-provider storyboard job"
       .get(projectId) as { spent_units: number; reserved_units: number };
     assert.equal(budget.spent_units, 2);
     assert.equal(budget.reserved_units, 0);
+
+    const blockedFinal = await app.inject({
+      method: "POST",
+      url: `/api/video/v1/projects/${projectId}/exports`,
+      headers: { "idempotency-key": "final-blocked", "content-type": "application/json" },
+      payload: { kind: "final" },
+    });
+    assert.equal(blockedFinal.statusCode, 409, blockedFinal.body);
+    assert.equal(blockedFinal.json().error.code, "EXPORT_FINAL_BLOCKED");
+    assert.ok(blockedFinal.json().error.details.blocking_scenes.length >= 6);
+
+    const draft = await app.inject({
+      method: "POST",
+      url: `/api/video/v1/projects/${projectId}/exports`,
+      headers: { "idempotency-key": "draft-export", "content-type": "application/json" },
+      payload: { kind: "draft" },
+    });
+    assert.equal(draft.statusCode, 202, draft.body);
+    const draftJobId = draft.json().job.id as string;
+    let draftJobStatus = "queued";
+    for (let attempt = 0; attempt < 100 && draftJobStatus !== "succeeded"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const response = await app.inject({ method: "GET", url: `/api/video/v1/jobs/${draftJobId}` });
+      draftJobStatus = response.json().job.status;
+    }
+    assert.equal(draftJobStatus, "succeeded");
+    const draftDownload = await app.inject({
+      method: "GET",
+      url: `/api/video/v1/exports/${draft.json().export.id}/download`,
+    });
+    assert.equal(draftDownload.statusCode, 200, draftDownload.body);
+    assert.equal(draftDownload.rawPayload.subarray(0, 2).toString("ascii"), "PK");
+
+    const batchRun = await app.inject({
+      method: "POST",
+      url: `/api/video/v1/projects/${projectId}/storyboard-runs`,
+      headers: { "idempotency-key": "storyboard-batch", "content-type": "application/json" },
+      payload: { expected_project_revision: 2 },
+    });
+    assert.equal(batchRun.statusCode, 202, batchRun.body);
+    assert.equal(batchRun.json().jobs.length, 6);
+    for (const batchJob of batchRun.json().jobs as Array<{ id: string }>) {
+      let sceneJobStatus = "queued";
+      for (let attempt = 0; attempt < 100 && sceneJobStatus !== "succeeded"; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const response = await app.inject({ method: "GET", url: `/api/video/v1/jobs/${batchJob.id}` });
+        sceneJobStatus = response.json().job.status;
+      }
+      assert.equal(sceneJobStatus, "succeeded");
+    }
+    const generatedScenes = await app.inject({ method: "GET", url: `/api/video/v1/projects/${projectId}/scenes` });
+    for (const scene of generatedScenes.json().scenes as Array<{ id: string; revision: number }>) {
+      const current = await app.inject({
+        method: "GET",
+        url: `/api/video/v1/projects/${projectId}/scenes/${scene.id}`,
+      });
+      assert.equal(current.statusCode, 200, current.body);
+      assert.equal(current.json().scene.generation_status, "ready");
+      assert.equal(current.json().scene.qc_status, "passed");
+      assert.ok(current.json().scene.storyboard_asset_id);
+      const image = await app.inject({
+        method: "GET",
+        url: `/api/video/v1/assets/${current.json().scene.storyboard_asset_id}/content`,
+      });
+      assert.equal(image.statusCode, 200, image.body);
+      assert.equal(image.headers["content-type"], "image/png");
+      const locked = await app.inject({
+        method: "POST",
+        url: `/api/video/v1/projects/${projectId}/scenes/${scene.id}/locks`,
+        headers: {
+          "if-match": `"${scene.revision}"`,
+          "idempotency-key": `lock-${scene.id}`,
+          "content-type": "application/json",
+        },
+        payload: {},
+      });
+      assert.equal(locked.statusCode, 200, locked.body);
+      assert.equal(locked.json().scene.locked_revision_id, locked.json().scene.current_revision_id);
+    }
+
+    const finalExport = await app.inject({
+      method: "POST",
+      url: `/api/video/v1/projects/${projectId}/exports`,
+      headers: { "idempotency-key": "final-export", "content-type": "application/json" },
+      payload: { kind: "final" },
+    });
+    assert.equal(finalExport.statusCode, 202, finalExport.body);
+    const finalJobId = finalExport.json().job.id as string;
+    let finalJobStatus = "queued";
+    for (let attempt = 0; attempt < 100 && finalJobStatus !== "succeeded"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const response = await app.inject({ method: "GET", url: `/api/video/v1/jobs/${finalJobId}` });
+      finalJobStatus = response.json().job.status;
+    }
+    assert.equal(finalJobStatus, "succeeded");
+    const finalState = await app.inject({ method: "GET", url: `/api/video/v1/exports/${finalExport.json().export.id}` });
+    assert.equal(finalState.statusCode, 200, finalState.body);
+    assert.equal(finalState.json().export.status, "ready");
+    assert.equal(finalState.json().export.manifest.kind, "final");
+    assert.equal(finalState.json().export.manifest.scenes.length, 6);
+    assert.equal(finalState.json().export.manifest.files.filter((file: { path: string }) => file.path.startsWith("storyboards/")).length, 6);
+    const finishedBudget = database.raw
+      .prepare("SELECT spent_units, reserved_units FROM video_usage_budgets WHERE project_id = ?")
+      .get(projectId) as { spent_units: number; reserved_units: number };
+    assert.equal(finishedBudget.spent_units, 8);
+    assert.equal(finishedBudget.reserved_units, 0);
+
+    const baselineScenes = generatedScenes.json().scenes as Array<{
+      id: string;
+      revision: number;
+      storyboard_asset_id: string;
+    }>;
+    const ctaScene = baselineScenes.at(-1)!;
+    const unlocked = await app.inject({
+      method: "DELETE",
+      url: `/api/video/v1/projects/${projectId}/scenes/${ctaScene.id}/locks/current`,
+      headers: { "idempotency-key": "unlock-cta", "content-type": "application/json" },
+      payload: {},
+    });
+    assert.equal(unlocked.statusCode, 200, unlocked.body);
+    const edited = await app.inject({
+      method: "PATCH",
+      url: `/api/video/v1/projects/${projectId}/scenes/${ctaScene.id}`,
+      headers: {
+        "if-match": `"${ctaScene.revision}"`,
+        "idempotency-key": "edit-cta",
+        "content-type": "application/json",
+      },
+      payload: { headline: "新的低压力 CTA", prompt: "A revised safe CTA scene for the current product" },
+    });
+    assert.equal(edited.statusCode, 200, edited.body);
+    assert.equal(edited.json().scene.revision, ctaScene.revision + 1);
+    assert.equal(edited.json().scene.generation_status, "stale");
+    assert.equal(edited.json().scene.storyboard_asset_id, null);
+    const redo = await app.inject({
+      method: "POST",
+      url: `/api/video/v1/projects/${projectId}/scenes/${ctaScene.id}/image-runs`,
+      headers: {
+        "if-match": `"${ctaScene.revision + 1}"`,
+        "idempotency-key": "redo-cta",
+        "content-type": "application/json",
+      },
+      payload: { regeneration_scope: "rebuild_from_current_fields" },
+    });
+    assert.equal(redo.statusCode, 202, redo.body);
+    let redoStatus = "queued";
+    for (let attempt = 0; attempt < 100 && redoStatus !== "succeeded"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const response = await app.inject({ method: "GET", url: `/api/video/v1/jobs/${redo.json().job.id}` });
+      redoStatus = response.json().job.status;
+    }
+    assert.equal(redoStatus, "succeeded");
+    const afterRedo = await app.inject({ method: "GET", url: `/api/video/v1/projects/${projectId}/scenes` });
+    const afterScenes = afterRedo.json().scenes as typeof baselineScenes;
+    assert.deepEqual(
+      afterScenes.slice(0, 5).map((scene) => [scene.id, scene.revision, scene.storyboard_asset_id]),
+      baselineScenes.slice(0, 5).map((scene) => [scene.id, scene.revision, scene.storyboard_asset_id]),
+    );
+    assert.equal(afterScenes.at(-1)?.revision, ctaScene.revision + 1);
+    assert.notEqual(afterScenes.at(-1)?.storyboard_asset_id, ctaScene.storyboard_asset_id);
   } finally {
     await module.close();
     await app.close();
@@ -266,6 +439,10 @@ test("worker drain releases an unsubmitted job reservation and permits immediate
       repository.completeUpload("local", created.upload.id, {
         detectedMime: mime,
         storageKey: `fixture/${hash}`,
+        width: role === "source_video" ? 1080 : 800,
+        height: role === "source_video" ? 1920 : 800,
+        durationMs: role === "source_video" ? 15_000 : null,
+        metadata: role === "source_video" ? { has_audio: false } : {},
       });
     }
     const job = repository.enqueuePrototypeAnalysis({

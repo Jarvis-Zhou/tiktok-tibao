@@ -24,7 +24,7 @@ test("serves the integrated video studio and Tibao handoff hooks", async (t) => 
   assert.equal(studioApp.statusCode, 200);
   assert.match(studioApp.body, /tibao:video-product/);
   assert.match(studioApp.body, /accept="video\/mp4,\.mp4"/);
-  assert.match(studioApp.body, /Phase A 已连接本地服务/);
+  assert.match(studioApp.body, /Phase B 本地链路/);
   assert.match(studioApp.body, /\/api\/video\/v1/);
   assert.match(studioApp.body, /分析爆款结构/);
   assert.match(studioApp.body, /导出 Prompt 包/);

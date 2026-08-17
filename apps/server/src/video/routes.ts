@@ -15,6 +15,7 @@ import type { AppConfig } from "../config.js";
 import { resolveVideoConfig } from "../config.js";
 import type { TibaoDatabase } from "../database.js";
 import { VideoModule } from "./module.js";
+import type { MediaToolchain } from "./media/ffmpeg-media-toolchain.js";
 
 const OWNER_ID = "local";
 const RAW_MEDIA_TYPES = [
@@ -32,6 +33,7 @@ type UnknownRecord = Record<string, unknown>;
 export interface VideoRouteDependencies {
   config: AppConfig;
   database: TibaoDatabase;
+  mediaToolchain?: MediaToolchain;
 }
 
 function record(value: unknown): UnknownRecord {
@@ -214,7 +216,12 @@ export async function registerVideoRoutes(
 ): Promise<VideoModule | null> {
   const config = resolveVideoConfig(dependencies.config);
   if (!config.enabled) return null;
-  const module = await VideoModule.create(dependencies.config, dependencies.database, app.log);
+  const module = await VideoModule.create(
+    dependencies.config,
+    dependencies.database,
+    app.log,
+    dependencies.mediaToolchain,
+  );
   app.addHook("onClose", async () => module.close());
 
   await app.register(
@@ -420,8 +427,26 @@ export async function registerVideoRoutes(
         if (!allowedDetectedTypes.includes(detectedMime)) {
           throw new VideoDomainError({ code: "UPLOAD_CONTENT_INVALID", message: "Media signature does not match the upload role", statusCode: 415 });
         }
+        const tempPath = module.storage.tempPath(upload.tempKey);
+        const metadata = upload.role === "source_video"
+          ? await module.media.probeVideo(tempPath)
+          : await module.media.probeImage(tempPath);
         const storageKey = await module.storage.commit(OWNER_ID, upload.tempKey, upload.receivedSha256);
-        const asset = module.repository.completeUpload(OWNER_ID, upload.id, { detectedMime, storageKey });
+        const asset = module.repository.completeUpload(OWNER_ID, upload.id, {
+          detectedMime,
+          storageKey,
+          width: metadata.width,
+          height: metadata.height,
+          durationMs: "durationSec" in metadata ? Math.round(metadata.durationSec * 1_000) : null,
+          metadata: "durationSec" in metadata
+            ? {
+                fps: metadata.fps,
+                video_codec: metadata.videoCodec,
+                has_audio: metadata.hasAudio,
+                audio_codec: metadata.audioCodec,
+              }
+            : { image_codec: metadata.codec },
+        });
         return { upload_id: upload.id, status: "completed", asset };
       });
 
@@ -468,23 +493,211 @@ export async function registerVideoRoutes(
         if (previous.status !== "failed" && previous.status !== "cancelled" && previous.status !== "superseded") {
           throw new VideoDomainError({ code: "INVALID_STATE_TRANSITION", message: "Only terminal unsuccessful jobs can be retried", statusCode: 409 });
         }
-        const project = module.repository.getProject(OWNER_ID, previous.project_id);
+        const target = module.repository.getJobTarget(OWNER_ID, previous.id);
+        if (!target) throw new VideoDomainError({ code: "JOB_NOT_FOUND", message: "Video job target not found", statusCode: 404 });
+        const project = module.repository.getProject(OWNER_ID, target.projectId);
         if (!project) throw new VideoDomainError({ code: "PROJECT_NOT_FOUND", message: "Video project not found", statusCode: 404 });
-        const result = module.repository.enqueuePrototypeAnalysis({
-          ownerId: OWNER_ID,
-          projectId: project.id,
-          expectedProjectRevision: project.revision,
-          policyVersion: "retry-existing-acceptance",
-          requestId: request.id,
-          idempotency: idempotency(request, "POST /jobs/:jobId/retries", request.body ?? {}),
-          retryOfJobId: previous.id,
-        });
+        const retryIdempotency = idempotency(request, "POST /jobs/:jobId/retries", request.body ?? {});
+        let result: unknown;
+        if (target.type === "scene_storyboard") {
+          const scene = module.repository.getScene(OWNER_ID, target.targetId, target.projectId);
+          if (!scene) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene no longer exists", statusCode: 404 });
+          result = module.repository.enqueueSceneGeneration({
+            ownerId: OWNER_ID,
+            sceneId: scene.id,
+            expectedRevision: scene.revision,
+            idempotency: retryIdempotency,
+            retryOfJobId: previous.id,
+          });
+        } else if (target.type === "prompt_package_export") {
+          const previousExport = module.repository.getExport(OWNER_ID, target.targetId);
+          if (!previousExport) throw new VideoDomainError({ code: "EXPORT_NOT_FOUND", message: "Prompt package export no longer exists", statusCode: 404 });
+          result = module.repository.enqueuePromptPackageExport({
+            ownerId: OWNER_ID,
+            projectId: project.id,
+            kind: previousExport.kind,
+            idempotency: retryIdempotency,
+            retryOfJobId: previous.id,
+          });
+        } else {
+          result = module.repository.enqueuePrototypeAnalysis({
+            ownerId: OWNER_ID,
+            projectId: project.id,
+            expectedProjectRevision: project.revision,
+            policyVersion: "retry-existing-acceptance",
+            requestId: request.id,
+            idempotency: retryIdempotency,
+            retryOfJobId: previous.id,
+          });
+        }
         return reply.code(202).send(result);
       });
 
       videoApp.get<{ Params: { projectId: string } }>("/projects/:projectId/scenes", async (request) => {
         if (!module.repository.getProject(OWNER_ID, request.params.projectId)) throw new VideoDomainError({ code: "PROJECT_NOT_FOUND", message: "Video project not found", statusCode: 404 });
         return { scenes: module.repository.listScenes(OWNER_ID, request.params.projectId) };
+      });
+
+      videoApp.post<{ Params: { projectId: string } }>("/projects/:projectId/storyboard-runs", async (request, reply) => {
+        const body = record(request.body);
+        const expectedProjectRevision = Number(body.expected_project_revision);
+        if (!Number.isSafeInteger(expectedProjectRevision) || expectedProjectRevision < 1) {
+          throw new VideoDomainError({ code: "INVALID_PROJECT_REVISION", message: "expected_project_revision is required", statusCode: 400 });
+        }
+        const result = module.repository.enqueueStoryboardBatch({
+          ownerId: OWNER_ID,
+          projectId: request.params.projectId,
+          expectedProjectRevision,
+          idempotency: idempotency(request, "POST /projects/:projectId/storyboard-runs", request.body),
+        });
+        return reply.code(202).send(result);
+      });
+
+      videoApp.get<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+        const scene = module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId);
+        if (!scene) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        return reply.header("etag", etag(scene.revision)).send({ scene });
+      });
+
+      videoApp.patch<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+        if (!module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId)) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        const body = record(request.body);
+        const patch: {
+          headline?: string;
+          overlay?: string;
+          caption?: string;
+          script?: string;
+          prompt?: string;
+          duration_sec?: number;
+        } = {};
+        for (const key of ["headline", "overlay", "caption", "script", "prompt"] as const) {
+          if (body[key] !== undefined) patch[key] = optionalText(body[key], key === "prompt" ? 8_000 : 2_000) ?? "";
+        }
+        if (body.duration_sec !== undefined) {
+          const duration = Number(body.duration_sec);
+          if (!Number.isFinite(duration) || duration <= 0 || duration > 30 || Math.abs(duration * 100 - Math.round(duration * 100)) > 1e-7) {
+            throw new VideoDomainError({ code: "INVALID_DURATION", message: "duration_sec must be 0–30 seconds with at most two decimals", statusCode: 400 });
+          }
+          patch.duration_sec = duration;
+        }
+        if (Object.keys(patch).length === 0) throw new VideoDomainError({ code: "INVALID_REQUEST", message: "No editable scene fields were provided", statusCode: 400 });
+        const scene = module.repository.updateScene(
+          OWNER_ID,
+          request.params.sceneId,
+          ifMatchRevision(request),
+          patch,
+          idempotency(request, "PATCH /projects/:projectId/scenes/:sceneId", request.body),
+        );
+        return reply.header("etag", etag(scene.revision)).send({ scene });
+      });
+
+      videoApp.post<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId/image-runs", async (request, reply) => {
+        if (!module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId)) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        const body = record(request.body ?? {});
+        const regenerationScope = text(body.regeneration_scope) || "rebuild_from_current_fields";
+        const allowedScopes = [
+          "keep_composition_change_action",
+          "keep_product_change_environment",
+          "keep_all_change_seed",
+          "rebuild_from_current_fields",
+        ];
+        if (!allowedScopes.includes(regenerationScope)) {
+          throw new VideoDomainError({ code: "INVALID_REQUEST", message: "Unsupported regeneration_scope", statusCode: 400, details: { allowed_scopes: allowedScopes } });
+        }
+        const result = module.repository.enqueueSceneGeneration({
+          ownerId: OWNER_ID,
+          sceneId: request.params.sceneId,
+          expectedRevision: ifMatchRevision(request),
+          regenerationScope,
+          idempotency: idempotency(request, "POST /projects/:projectId/scenes/:sceneId/image-runs", request.body ?? {}),
+        });
+        return reply.code(202).send(result);
+      });
+
+      videoApp.post<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId/locks", async (request, reply) => {
+        if (!module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId)) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        const scene = module.repository.lockScene(
+          OWNER_ID,
+          request.params.sceneId,
+          ifMatchRevision(request),
+          idempotency(request, "POST /projects/:projectId/scenes/:sceneId/locks", request.body ?? {}),
+        );
+        return reply.header("etag", etag(scene.revision)).send({ scene });
+      });
+
+      videoApp.delete<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId/locks/current", async (request, reply) => {
+        if (!module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId)) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        const scene = module.repository.unlockScene(
+          OWNER_ID,
+          request.params.sceneId,
+          idempotency(request, "DELETE /projects/:projectId/scenes/:sceneId/locks/current", request.body ?? {}),
+        );
+        return reply.header("etag", etag(scene.revision)).send({ scene });
+      });
+
+      videoApp.post<{ Params: { projectId: string; sceneId: string } }>("/projects/:projectId/scenes/:sceneId/qc-acceptances", async (request, reply) => {
+        if (!module.repository.getScene(OWNER_ID, request.params.sceneId, request.params.projectId)) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
+        const body = record(request.body);
+        const reason = optionalText(body.reason, 500);
+        if (!reason) throw new VideoDomainError({ code: "INVALID_REQUEST", message: "QC acceptance reason is required", statusCode: 400 });
+        const scene = module.repository.acceptSceneQc({
+          ownerId: OWNER_ID,
+          sceneId: request.params.sceneId,
+          expectedRevision: ifMatchRevision(request),
+          reason,
+          requestId: request.id,
+          idempotency: idempotency(request, "POST /projects/:projectId/scenes/:sceneId/qc-acceptances", request.body),
+        });
+        return reply.header("etag", etag(scene.revision)).send({ scene });
+      });
+
+      videoApp.post<{ Params: { projectId: string } }>("/projects/:projectId/exports", async (request, reply) => {
+        const body = record(request.body);
+        const kind = text(body.kind) || "draft";
+        if (kind !== "draft" && kind !== "final") {
+          throw new VideoDomainError({ code: "INVALID_REQUEST", message: "Export kind must be draft or final", statusCode: 400 });
+        }
+        const result = module.repository.enqueuePromptPackageExport({
+          ownerId: OWNER_ID,
+          projectId: request.params.projectId,
+          kind,
+          idempotency: idempotency(request, "POST /projects/:projectId/exports", request.body),
+        });
+        return reply.code(202).send(result);
+      });
+
+      videoApp.get<{ Params: { projectId: string } }>("/projects/:projectId/exports", async (request) => {
+        if (!module.repository.getProject(OWNER_ID, request.params.projectId)) throw new VideoDomainError({ code: "PROJECT_NOT_FOUND", message: "Video project not found", statusCode: 404 });
+        return { exports: module.repository.listExports(OWNER_ID, request.params.projectId) };
+      });
+
+      videoApp.get<{ Params: { exportId: string } }>("/exports/:exportId", async (request) => {
+        const exported = module.repository.getExport(OWNER_ID, request.params.exportId);
+        if (!exported) throw new VideoDomainError({ code: "EXPORT_NOT_FOUND", message: "Prompt package export not found", statusCode: 404 });
+        return {
+          export: exported,
+          download_url: exported.status === "ready" ? `/api/video/v1/exports/${exported.id}/download` : null,
+        };
+      });
+
+      videoApp.get<{ Params: { exportId: string } }>("/exports/:exportId/download", async (request, reply) => {
+        const download = module.repository.getExportDownload(OWNER_ID, request.params.exportId);
+        if (!download) throw new VideoDomainError({ code: "EXPORT_NOT_READY", message: "Prompt package is not ready", statusCode: 409 });
+        return reply
+          .header("content-type", "application/zip")
+          .header("content-length", String(download.bytes))
+          .header("content-disposition", `attachment; filename="${download.filename}"`)
+          .send(module.storage.createReadStream(download.storageKey));
+      });
+
+      videoApp.get<{ Params: { assetId: string } }>("/assets/:assetId/content", async (request, reply) => {
+        const asset = module.repository.getAssetDownload(OWNER_ID, request.params.assetId);
+        if (!asset) throw new VideoDomainError({ code: "ASSET_NOT_FOUND", message: "Video asset not found", statusCode: 404 });
+        return reply
+          .header("content-type", asset.mimeType)
+          .header("content-length", String(asset.bytes))
+          .header("cache-control", "private, max-age=60")
+          .send(module.storage.createReadStream(asset.storageKey));
       });
 
       videoApp.get<{ Params: { projectId: string } }>("/projects/:projectId/events", async (request, reply) => {

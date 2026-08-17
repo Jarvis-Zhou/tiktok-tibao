@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tibao.local/schemas/product-profile.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "image_asset_ids", "category", "material", "shape", "colors", "key_parts", "visual_features", "supported_actions", "possible_use_cases", "limitations", "claims", "source_images"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "image_asset_ids": { "type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "category": { "$ref": "#/$defs/fact" }, "material": { "$ref": "#/$defs/fact" }, "shape": { "$ref": "#/$defs/fact" }, "colors": { "$ref": "#/$defs/fact" },
+    "key_parts": { "$ref": "#/$defs/facts" }, "visual_features": { "$ref": "#/$defs/facts" }, "supported_actions": { "$ref": "#/$defs/facts" },
+    "possible_use_cases": { "$ref": "#/$defs/facts" }, "limitations": { "$ref": "#/$defs/facts" }, "claims": { "$ref": "#/$defs/facts" },
+    "source_images": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false, "required": ["asset_id", "view", "quality"],
+        "properties": { "asset_id": { "type": "string", "minLength": 1 }, "view": { "type": "string", "minLength": 1 }, "quality": { "enum": ["low", "medium", "high"] } }
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["asset_id"],
+      "properties": { "asset_id": { "type": "string", "minLength": 1 }, "timestamp_sec": { "type": "number", "minimum": 0, "multipleOf": 0.01 }, "region": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number", "minimum": 0, "maximum": 1 } }, "note": { "type": "string" } }
+    },
+    "fact": {
+      "type": "object", "additionalProperties": false, "required": ["fact_id", "value", "source", "confidence", "evidence", "confirmed_by_user"],
+      "properties": {
+        "fact_id": { "type": "string", "minLength": 1 },
+        "value": { "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }, { "type": "null" }, { "type": "array", "items": { "type": "string" } }] },
+        "source": { "enum": ["observed", "user_provided", "inferred"] }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }, "confirmed_by_user": { "type": "boolean" }
+      }
+    },
+    "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } }
+  }
+}

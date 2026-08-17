@@ -74,6 +74,11 @@ export interface VideoConfig {
   dataEncryptionKey: string;
   projectBudgetUnits: number;
   fakeProvider: boolean;
+  ffmpegPath: string;
+  ffprobePath: string;
+  mediaProcessTimeoutMs: number;
+  maxDecodedPixels: number;
+  maxExtractedFrames: number;
 }
 
 export function loadVideoConfig(env: NodeJS.ProcessEnv = process.env): VideoConfig {
@@ -107,6 +112,11 @@ export function loadVideoConfig(env: NodeJS.ProcessEnv = process.env): VideoConf
     dataEncryptionKey: env.VIDEO_DATA_ENCRYPTION_KEY?.trim() || "",
     projectBudgetUnits: positiveInteger(env.VIDEO_PROJECT_BUDGET_UNITS, 100),
     fakeProvider: booleanValue(env.VIDEO_FAKE_PROVIDER, true),
+    ffmpegPath: env.VIDEO_FFMPEG_PATH?.trim() || "ffmpeg",
+    ffprobePath: env.VIDEO_FFPROBE_PATH?.trim() || "ffprobe",
+    mediaProcessTimeoutMs: positiveInteger(env.VIDEO_MEDIA_PROCESS_TIMEOUT_MS, 60_000),
+    maxDecodedPixels: positiveInteger(env.VIDEO_MAX_DECODED_PIXELS, 40_000_000),
+    maxExtractedFrames: positiveInteger(env.VIDEO_MAX_EXTRACTED_FRAMES, 24),
   };
 }
 

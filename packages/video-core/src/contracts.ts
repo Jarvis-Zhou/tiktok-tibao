@@ -29,7 +29,15 @@ export const VIDEO_JOB_STATUSES = [
 ] as const;
 
 export type VideoJobStatus = (typeof VIDEO_JOB_STATUSES)[number];
-export type VideoJobType = "prototype_analysis";
+import type {
+  AdaptedBlueprint,
+  ProductProfile,
+  SourceVideoAnalysis,
+  StoryboardGenerationStatus,
+  StoryboardQcStatus,
+} from "./artifacts.js";
+
+export type VideoJobType = "prototype_analysis" | "scene_storyboard" | "prompt_package_export";
 export type VideoJobCategory = "media" | "text" | "image";
 export type VideoAssetRole = "source_video" | "product_image" | "custom_storyboard";
 export type VideoAssetStatus = "pending" | "uploading" | "uploaded" | "ready" | "rejected";
@@ -67,6 +75,10 @@ export interface VideoAsset {
   mime_type: string;
   bytes: number | null;
   sha256: string | null;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  metadata: Record<string, unknown>;
   sort_order: number;
   is_primary: boolean;
   created_at: string;
@@ -76,11 +88,14 @@ export interface VideoAsset {
 export interface PrototypeScene {
   id: string;
   position: number;
-  generation_status: "ready";
+  generation_status: StoryboardGenerationStatus;
   revision: number;
   generation: number;
   locked_revision_id: string | null;
+  current_revision_id: string | null;
   stale_reason: string | null;
+  qc_status: StoryboardQcStatus;
+  storyboard_asset_id: string | null;
   short: string;
   label: string;
   title: string;
@@ -102,9 +117,9 @@ export interface PrototypeAnalysisResult {
     scene_count: number;
     confidence: number;
   };
-  source_blueprint: Record<string, unknown>;
-  product_profile: Record<string, unknown>;
-  adapted_blueprint: Record<string, unknown>;
+  source_blueprint: SourceVideoAnalysis;
+  product_profile: ProductProfile;
+  adapted_blueprint: AdaptedBlueprint;
   scenes: PrototypeScene[];
 }
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tibao.local/schemas/prompt-package-manifest.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "export_id", "project_id", "kind", "created_at", "source_blueprint_id", "product_profile_id", "adapted_blueprint_id", "scenes", "excluded_source_material", "files"],
+  "properties": {
+    "schema_version": { "const": "1.0" }, "export_id": { "type": "string", "minLength": 1 }, "project_id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["draft", "final"] }, "created_at": { "type": "string", "format": "date-time" }, "source_blueprint_id": { "type": "string", "minLength": 1 },
+    "product_profile_id": { "type": "string", "minLength": 1 }, "adapted_blueprint_id": { "type": "string", "minLength": 1 },
+    "excluded_source_material": { "type": "array", "minItems": 3, "uniqueItems": true, "items": { "enum": ["source_video", "source_audio", "full_transcript"] } },
+    "scenes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/scene" } },
+    "files": { "type": "array", "items": { "$ref": "#/$defs/file" } }
+  },
+  "$defs": {
+    "scene": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scene_id", "position", "revision_id", "revision", "generation", "generation_status", "stale_reason", "qc_status", "qc_accepted", "locked_revision_id", "storyboard_asset_id"],
+      "properties": {
+        "scene_id": { "type": "string" }, "position": { "type": "integer", "minimum": 1 }, "revision_id": { "type": "string" }, "revision": { "type": "integer", "minimum": 1 },
+        "generation": { "type": "integer", "minimum": 0 }, "generation_status": { "enum": ["not_generated", "queued", "generating", "ready", "needs_review", "failed", "stale"] },
+        "stale_reason": { "type": ["string", "null"] }, "qc_status": { "enum": ["pending", "passed", "needs_review", "accepted", "failed"] },
+        "qc_accepted": { "type": "boolean" }, "locked_revision_id": { "type": ["string", "null"] }, "storyboard_asset_id": { "type": ["string", "null"] }
+      }
+    },
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "bytes", "sha256"],
+      "properties": { "path": { "type": "string", "minLength": 1 }, "bytes": { "type": "integer", "minimum": 0 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+    }
+  }
+}

@@ -95,6 +95,15 @@ const TIMED_SCENES = SCENES.map((scene) => {
 
 const AUDIO_BARS = [8, 16, 10, 22, 14, 28, 18, 9, 24, 15, 30, 20, 11, 26, 17, 8, 21, 13, 27, 16, 9, 23, 12, 29, 18, 10, 25, 14, 20, 8, 24, 16, 11, 28, 18, 9, 22, 13, 26, 15, 10, 21, 12, 24, 16, 9, 19, 12, 22, 14, 8, 18, 11, 20, 13, 8, 16, 10, 18, 12];
 const SCENE_COLORS = ["#d95e42", "#3b6486", "#3f8078", "#655b91", "#9b5671", "#a9793c"];
+const DEMO_VIDEO_BASE64 = "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM1bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAC7gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmB0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAC7gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAcAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAu4AACAAAABAAAAAAHYbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAwABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABg21pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUNzdGJsAAAAl3N0c2QAAAAAAAAAAQAAAIdhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAHABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAMWF2Y0MBZAAK/+EAGGdkAAqs2VX7wEQAAAMABAAAAwAIPEiWWAEABmjr48siwAAAABhzdHRzAAAAAAAAAAEAAAADAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAKGN0dHMAAAAAAAAAAwAAAAEAAIAAAAAAAQAAwAAAAAABAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAwAAAAEAAAAgc3RzegAAAAAAAAAAAAAAAwAAAs4AAAAMAAAADAAAABRzdGNvAAAAAAAAAAEAAANlAAAAYXVkdGEAAABZbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAsaWxzdAAAACSpdG9vAAAAHGRhdGEAAAABAAAAAExhdmY1Ni40LjEwMQAAAAhmcmVlAAAC7m1kYXQAAAKuBgX//6rcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTQyIHIyNDkxIDI0ZTRmZWQgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDE0IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MTIgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAYZYiEABf//u6CvgU3X8QPwzzx+tAhUKXxAAAACEGaImxBX/7cAAAACAGeQXkFf1RB";
+const DEMO_IMAGE_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAKklEQVR4nO3NMQ0AAAzDsPLHMZzTSKyfpdxxdlKtewcAAAAAAAAAAACPHdZiiFu/ZXsfAAAAAElFTkSuQmCC";
+
+function fileFromBase64(value, name, type) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new File([bytes], name, { type });
+}
 
 async function videoApi(path, options = {}) {
   const response = await fetch(`/api/video/v1${path}`, options);
@@ -275,7 +284,7 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
           <p className="setup-lede">
             导入参考视频和商品素材。ReCut 会识别钩子、节奏、口播与商品露出时机，再把这套结构改写成你的版本。
           </p>
-          <div className="prototype-notice"><strong>Phase A 已连接本地服务</strong><span>素材、项目和作业状态会真实持久化；当前使用 deterministic Fake Provider，只生成 Storyboard，不生成 MP4。</span></div>
+          <div className="prototype-notice"><strong>Phase B 本地链路</strong><span>FFmpeg 探测/抽帧、逐镜 Job/QC、版本锁定和 Prompt 包导出均真实运行；AI Provider 仍为 deterministic Fake Adapter，不生成 MP4。</span></div>
           <div className="workflow-strip" aria-label="重制流程">
             <div className="workflow-step"><span>01 · INPUT</span><strong>导入参考与商品</strong></div>
             <div className="workflow-step"><span>02 · DECODE</span><strong>拆解爆款结构</strong></div>
@@ -691,7 +700,7 @@ function Toast({ title, message }) {
 function AccountMenu({ onClose, onToast }) {
   return (
     <div className="account-menu">
-      <div className="account-summary"><strong>本地运营账户</strong><span>Tibao 视频工作台 · Phase A</span></div>
+      <div className="account-summary"><strong>本地运营账户</strong><span>Tibao 视频工作台 · Phase B</span></div>
       <button type="button" onClick={() => { onToast("本地 Alpha", "当前使用 Fake Provider，但项目、素材、Job 和额度都是真实台账"); onClose(); }}><Icon name="folder" size={14} /> 查看空间说明</button>
       <button type="button" onClick={() => { openTweaks(); onClose(); }}><Icon name="settings" size={14} /> 原型风格设置</button>
     </div>
@@ -754,7 +763,7 @@ function App() {
       const restoredScenes = projectScenes(sceneResponse.scenes || []);
       if (restoredScenes.length > 0) {
         setPersistedScenes(restoredScenes);
-        setGenerated(true);
+        setGenerated(restoredScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
         setScreen("editor");
         return;
       }
@@ -806,8 +815,9 @@ function App() {
           ]);
           if (cancelled) return;
           setProject(aggregate.project);
-          setPersistedScenes(projectScenes(sceneResponse.scenes || []));
-          setGenerated(true);
+          const analyzedScenes = projectScenes(sceneResponse.scenes || []);
+          setPersistedScenes(analyzedScenes);
+          setGenerated(analyzedScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
           setCurrentTime(0);
           setScreen("editor");
           showToast("结构拆解完成", `服务端已持久化 ${(sceneResponse.scenes || []).length} 个可编辑 Storyboard`);
@@ -832,26 +842,6 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [screen, analysisJobId, showToast]);
-
-  React.useEffect(() => {
-    if (!rendering) return undefined;
-    setRenderProgress(0);
-    const timer = window.setInterval(() => {
-      setRenderProgress((value) => {
-        const next = Math.min(100, value + (value < 70 ? 5 : 2));
-        if (next === 100) {
-          window.clearInterval(timer);
-          window.setTimeout(() => {
-            setRendering(false);
-            setGenerated(true);
-            showToast("分镜生成完成", "当前输出为 Storyboard 与模型中立 Prompt，不会生成 MP4");
-          }, 360);
-        }
-        return next;
-      });
-    }, 130);
-    return () => window.clearInterval(timer);
-  }, [rendering, showToast]);
 
   React.useEffect(() => () => {
     window.clearTimeout(toastTimer.current);
@@ -891,7 +881,7 @@ function App() {
       return;
     }
     if (url.trim() && !referenceVideo) {
-      setFormError("Phase A 会校验链接但不会下载媒体，请上传本地 MP4 后继续。");
+      setFormError("当前版本会校验链接但不会下载媒体，请上传你有权使用的本地 MP4 后继续。");
       return;
     }
     if (!hasProduct || !productFile) {
@@ -949,12 +939,8 @@ function App() {
   };
 
   const handleDemo = () => {
-    const demoVideo = new File([
-      new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0])
-    ], "recut-phase-a-demo.mp4", { type: "video/mp4" });
-    const demoImage = new File([
-      new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
-    ], "glowdrop-main.png", { type: "image/png" });
+    const demoVideo = fileFromBase64(DEMO_VIDEO_BASE64, "recut-phase-b-demo.mp4", "video/mp4");
+    const demoImage = fileFromBase64(DEMO_IMAGE_BASE64, "glowdrop-main.png", "image/png");
     setUrl("");
     setReferenceVideo(demoVideo);
     setProductFile(demoImage);
@@ -962,7 +948,7 @@ function App() {
     setProductFileName("glowdrop-main.png");
     setHasProduct(true);
     setFormError("");
-    showToast("Phase A fixture 已载入", "点击分析后会真实上传、入队并由 Fake Provider 生成分镜");
+    showToast("Phase B fixture 已载入", "这是可被 FFprobe/FFmpeg 真实解码的 3 秒无音轨 MP4；ASR 会明确跳过");
   };
 
   const handleVideoFile = (event) => {
@@ -1027,6 +1013,115 @@ function App() {
     setSceneEdits((edits) => ({ ...edits, [activeScene.id]: { ...(edits[activeScene.id] || {}), [field]: value } }));
   };
 
+  const waitForJobs = async (jobIds) => {
+    const pending = new Set(jobIds);
+    for (let attempt = 0; attempt < 300 && pending.size > 0; attempt += 1) {
+      const states = await Promise.all([...pending].map((jobId) => videoApi(`/jobs/${jobId}`)));
+      for (const response of states) {
+        if (response.job.status === "succeeded") pending.delete(response.job.id);
+        else if (["failed", "cancelled", "superseded"].includes(response.job.status)) {
+          throw new Error(response.job.error_message || `作业 ${response.job.id} ${response.job.status}`);
+        }
+      }
+      setRenderProgress(Math.round(((jobIds.length - pending.size) / Math.max(1, jobIds.length)) * 100));
+      if (pending.size > 0) await new Promise((resolve) => window.setTimeout(resolve, 350));
+    }
+    if (pending.size > 0) throw new Error("等待服务端作业超时，请稍后从项目恢复");
+  };
+
+  const refreshProjectScenes = async () => {
+    if (!project?.id) return [];
+    const [aggregate, sceneResponse] = await Promise.all([
+      videoApi(`/projects/${project.id}`),
+      videoApi(`/projects/${project.id}/scenes`)
+    ]);
+    const nextScenes = projectScenes(sceneResponse.scenes || []);
+    setProject(aggregate.project);
+    setPersistedScenes(nextScenes);
+    setGenerated(nextScenes.length > 0 && nextScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
+    return nextScenes;
+  };
+
+  const handleGenerateStoryboards = async () => {
+    if (!project?.id || rendering) return;
+    setRendering(true);
+    setRenderProgress(0);
+    try {
+      const aggregate = await videoApi(`/projects/${project.id}`);
+      const batch = await videoApi(`/projects/${project.id}/storyboard-runs`, {
+        method: "POST",
+        headers: writeHeaders(),
+        body: JSON.stringify({ expected_project_revision: aggregate.project.revision })
+      });
+      await waitForJobs((batch.jobs || []).map((job) => job.id));
+      await refreshProjectScenes();
+      setGenerated(true);
+      showToast("分镜生成完成", "逐镜图片、QC 与版本已由服务端持久化；不会生成 MP4");
+    } catch (error) {
+      showToast("分镜生成未完成", error.message || "请稍后重试");
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const handleRegenerateScene = async () => {
+    if (!project?.id || !activeScene || rendering) return;
+    setRendering(true);
+    setRenderProgress(0);
+    try {
+      let revision = activeScene.revision;
+      const edits = sceneEdits[activeScene.id] || {};
+      if (Object.keys(edits).length > 0) {
+        const saved = await videoApi(`/projects/${project.id}/scenes/${activeScene.id}`, {
+          method: "PATCH",
+          headers: { ...writeHeaders(), "if-match": `"${revision}"` },
+          body: JSON.stringify(edits)
+        });
+        revision = saved.scene.revision;
+      }
+      const run = await videoApi(`/projects/${project.id}/scenes/${activeScene.id}/image-runs`, {
+        method: "POST",
+        headers: { ...writeHeaders(), "if-match": `"${revision}"` },
+        body: JSON.stringify({ regeneration_scope: "rebuild_from_current_fields" })
+      });
+      await waitForJobs([run.job.id]);
+      await refreshProjectScenes();
+      setSceneEdits((editsByScene) => ({ ...editsByScene, [activeScene.id]: {} }));
+      showToast("当前场景已重生成", "其他场景的图片、Prompt 和 revision 保持不变");
+    } catch (error) {
+      showToast("单镜重生成失败", error.message || "请稍后重试");
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!project?.id) return;
+    try {
+      const result = await videoApi(`/projects/${project.id}/exports`, {
+        method: "POST",
+        headers: writeHeaders(),
+        body: JSON.stringify({ kind: "draft" })
+      });
+      setRendering(true);
+      setRenderProgress(0);
+      await waitForJobs([result.job.id]);
+      const exported = await videoApi(`/exports/${result.export.id}`);
+      if (!exported.download_url) throw new Error("导出已完成但下载地址尚未就绪");
+      const anchor = document.createElement("a");
+      anchor.href = exported.download_url;
+      anchor.download = "";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      showToast("Prompt 包已生成", "ZIP 包含版本化 JSON、Markdown、Manifest 哈希与现有 Storyboard 图片");
+    } catch (error) {
+      showToast("导出失败", error.message || "项目内容仍已保存，可稍后重试");
+    } finally {
+      setRendering(false);
+    }
+  };
+
   const palette = Array.isArray(tweaks.palette) ? tweaks.palette : window.TWEAK_DEFAULTS.palette;
   const shellStyle = {
     "--accent": palette[0],
@@ -1046,8 +1141,8 @@ function App() {
         generated={generated}
         projectStatus={screen === "analyzing" ? analysisStage : project?.status}
         onBack={() => { setPlaying(false); setScreen("setup"); }}
-        onGenerate={() => setRendering(true)}
-        onExport={() => showToast("Prompt 包将在 Phase B 开放", "V1 导出 ZIP / Markdown / JSON；不会生成或导出 MP4")}
+        onGenerate={handleGenerateStoryboards}
+        onExport={handleExport}
         onToast={showToast}
       />
       <div className="workspace">
@@ -1089,7 +1184,7 @@ function App() {
             onSeek={(time) => setCurrentTime(Math.max(0, Math.min(TOTAL_DURATION - 0.01, time)))}
             onUpdateScene={updateScene}
             onUpload={() => fileRef.current?.click()}
-            onRegenerate={() => showToast("单镜重生成将在 Phase B 开放", "Phase A 已完成项目级作业、租约、持久化与恢复骨架")}
+            onRegenerate={handleRegenerateScene}
             onToast={showToast}
           />
         )}
