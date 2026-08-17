@@ -17,14 +17,17 @@ test("serves the integrated video studio and Tibao handoff hooks", async (t) => 
 
   const studio = await app.inject({ method: "GET", url: "/video-studio/" });
   assert.equal(studio.statusCode, 200);
-  assert.match(studio.body, /Tibao · AI 视频工作台（演示）/);
+  assert.match(studio.body, /Tibao · AI 视频工作台/);
   assert.match(studio.body, /src="app\.jsx"/);
 
   const studioApp = await app.inject({ method: "GET", url: "/video-studio/app.jsx" });
   assert.equal(studioApp.statusCode, 200);
   assert.match(studioApp.body, /tibao:video-product/);
   assert.match(studioApp.body, /accept="video\/mp4,\.mp4"/);
-  assert.match(studioApp.body, /当前仅展示交互结果，未调用模型或生成 MP4/);
+  assert.match(studioApp.body, /Phase A 已连接本地服务/);
+  assert.match(studioApp.body, /\/api\/video\/v1/);
+  assert.match(studioApp.body, /分析爆款结构/);
+  assert.match(studioApp.body, /导出 Prompt 包/);
 
   const consolePage = await app.inject({ method: "GET", url: "/" });
   assert.equal(consolePage.statusCode, 200);
@@ -34,4 +37,5 @@ test("serves the integrated video studio and Tibao handoff hooks", async (t) => 
   assert.equal(consoleApp.statusCode, 200);
   assert.match(consoleApp.body, /openVideoStudioForSelectedProduct/);
   assert.match(consoleApp.body, /sessionStorage\.setItem\("tibao:video-product"/);
+  assert.match(consoleApp.body, /shopRegion/);
 });

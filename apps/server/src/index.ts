@@ -3,14 +3,16 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { TikTokShopAuthClient } from "@tibao/tiktok-api";
-import { loadConfig, loadRootEnvironment } from "./config.js";
+import { loadConfig, loadRootEnvironment, validateVideoConfig } from "./config.js";
 import { TibaoDatabase } from "./database.js";
 import { registerRoutes } from "./routes.js";
 import { ApiRunner } from "./runner.js";
 import { TokenVault } from "./token-vault.js";
+import { registerVideoRoutes } from "./video/routes.js";
 
 loadRootEnvironment();
 const config = loadConfig();
+validateVideoConfig(config);
 const database = new TibaoDatabase(config.databasePath);
 const vault = new TokenVault(config.tokenEncryptionKey);
 const runner = new ApiRunner(config, database, vault);
@@ -38,6 +40,7 @@ await app.register(multipart, {
   limits: { files: 1, fileSize: 5 * 1024 * 1024, fields: 10 },
 });
 await registerRoutes(app, { config, database, vault, runner, oauthClient });
+const videoModule = await registerVideoRoutes(app, { config, database });
 await app.register(staticPlugin, {
   root: config.publicDirectory,
   prefix: "/",
@@ -55,8 +58,13 @@ app.setErrorHandler((error, _request, reply) => {
   void reply.code(statusCode).send({ error: statusCode >= 500 ? "服务端处理失败" : message });
 });
 
+let shuttingDown = false;
 const shutdown = async (): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  videoModule?.beginDrain();
   await app.close();
+  await videoModule?.close();
   database.close();
 };
 process.on("SIGINT", () => void shutdown().finally(() => process.exit(0)));

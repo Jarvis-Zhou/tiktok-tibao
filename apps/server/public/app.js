@@ -187,12 +187,15 @@ function openVideoStudioForSelectedProduct() {
   const ids = allSelectedProductIds();
   if (ids.length !== 1) throw new Error("进入 AI 视频工作台前请只选择 1 个商品");
   const product = state.products.find((item) => item.id === ids[0]);
+  const shopId = $("#match-shop-select").value;
+  const shop = state.shops.find((item) => item.id === shopId);
   const handoff = {
     id: ids[0],
     title: product?.title || ids[0],
     category: product?.categoryNames?.at(-1) || product?.categoryIds?.at(-1) || "",
     brandName: product?.brandName || "",
-    shopId: $("#match-shop-select").value,
+    shopId,
+    shopRegion: shop?.region || "",
   };
   sessionStorage.setItem("tibao:video-product", JSON.stringify(handoff));
   const params = new URLSearchParams({ source: "tibao", productId: handoff.id });

@@ -13,6 +13,7 @@ import type {
 } from "@tibao/core";
 
 type SqlRow = Record<string, unknown>;
+type NonPromise<T> = T extends PromiseLike<unknown> ? never : T;
 
 export interface ShopPublic {
   id: string;
@@ -193,6 +194,7 @@ function capturedOpportunityFromRow(row: SqlRow): CapturedOpportunity {
 
 export class TibaoDatabase {
   readonly raw: DatabaseSync;
+  private transactionActive = false;
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
@@ -203,6 +205,30 @@ export class TibaoDatabase {
 
   close(): void {
     this.raw.close();
+  }
+
+  transaction<T>(callback: () => NonPromise<T>): NonPromise<T> {
+    if (this.transactionActive) throw new Error("Nested database transactions are not allowed");
+    this.transactionActive = true;
+    this.raw.exec("BEGIN IMMEDIATE");
+    try {
+      const result = callback();
+      if (
+        result !== null &&
+        (typeof result === "object" || typeof result === "function") &&
+        "then" in result &&
+        typeof (result as { then?: unknown }).then === "function"
+      ) {
+        throw new TypeError("Database transaction callbacks must be synchronous");
+      }
+      this.raw.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.raw.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this.transactionActive = false;
+    }
   }
 
   private migrate(): void {
@@ -474,8 +500,7 @@ export class TibaoDatabase {
         captured_at = excluded.captured_at,
         updated_at = excluded.updated_at
     `);
-    this.raw.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       for (const product of products) {
         statement.run(
           input.shopId,
@@ -496,11 +521,7 @@ export class TibaoDatabase {
           timestamp,
         );
       }
-      this.raw.exec("COMMIT");
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
-    }
+    });
     const updated = products.filter((product) => existing.has(product.id)).length;
     return { total: products.length, inserted: products.length - updated, updated };
   }
@@ -580,8 +601,7 @@ export class TibaoDatabase {
         captured_at = excluded.captured_at,
         updated_at = excluded.updated_at
     `);
-    this.raw.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       for (const opportunity of opportunities) {
         statement.run(
           input.shopId,
@@ -607,11 +627,7 @@ export class TibaoDatabase {
           timestamp,
         );
       }
-      this.raw.exec("COMMIT");
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
-    }
+    });
     const updated = opportunities.filter((opportunity) => existing.has(opportunity.id)).length;
     return { total: opportunities.length, inserted: opportunities.length - updated, updated };
   }
@@ -648,8 +664,7 @@ export class TibaoDatabase {
     let inserted = 0;
     let duplicateRows = 0;
     const invalidDetails = [...input.invalidRows];
-    this.raw.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       this.raw
         .prepare(`
           INSERT INTO batches (
@@ -708,11 +723,7 @@ export class TibaoDatabase {
           WHERE id = ?
         `)
         .run(inserted, input.invalidRows.length + duplicateRows, duplicateRows, JSON.stringify(invalidDetails), batchId);
-      this.raw.exec("COMMIT");
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
-    }
+    });
 
     return {
       id: batchId,
@@ -812,16 +823,11 @@ export class TibaoDatabase {
         matched_at = excluded.matched_at,
         updated_at = excluded.updated_at
     `);
-    this.raw.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       for (const [productId, matchCount] of normalized) {
         statement.run(shopId, productId, matchCount, timestamp, timestamp);
       }
-      this.raw.exec("COMMIT");
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   productSubmissionProgress(
@@ -892,8 +898,7 @@ export class TibaoDatabase {
     batchId?: string,
     shopId?: string,
   ): TaskRecord | null {
-    this.raw.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const clauses = ["status = 'ready'", "channel = ?"];
       const parameters: string[] = [channel];
       if (batchId) {
@@ -909,10 +914,7 @@ export class TibaoDatabase {
           `SELECT * FROM tasks WHERE ${clauses.join(" AND ")} ORDER BY created_at, source_row LIMIT 1`,
         )
         .get(...parameters) as SqlRow | undefined;
-      if (!row) {
-        this.raw.exec("COMMIT");
-        return null;
-      }
+      if (!row) return null;
       const timestamp = nowIso();
       const lease = new Date(Date.now() + leaseMinutes * 60_000).toISOString();
       const result = this.raw
@@ -922,18 +924,11 @@ export class TibaoDatabase {
           WHERE id = ? AND status = 'ready'
         `)
         .run(lease, timestamp, String(row.id));
-      if (result.changes === 0) {
-        this.raw.exec("ROLLBACK");
-        return null;
-      }
+      if (result.changes === 0) return null;
       this.addEvent(String(row.id), "claimed", { channel });
       const claimed = this.raw.prepare("SELECT * FROM tasks WHERE id = ?").get(String(row.id)) as SqlRow;
-      this.raw.exec("COMMIT");
       return taskFromRow(claimed);
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   completeTask(id: string, input: CompleteTaskInput): TaskRecord | null {

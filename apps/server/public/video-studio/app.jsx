@@ -94,6 +94,42 @@ const TIMED_SCENES = SCENES.map((scene) => {
 });
 
 const AUDIO_BARS = [8, 16, 10, 22, 14, 28, 18, 9, 24, 15, 30, 20, 11, 26, 17, 8, 21, 13, 27, 16, 9, 23, 12, 29, 18, 10, 25, 14, 20, 8, 24, 16, 11, 28, 18, 9, 22, 13, 26, 15, 10, 21, 12, 24, 16, 9, 19, 12, 22, 14, 8, 18, 11, 20, 13, 8, 16, 10, 18, 12];
+const SCENE_COLORS = ["#d95e42", "#3b6486", "#3f8078", "#655b91", "#9b5671", "#a9793c"];
+
+async function videoApi(path, options = {}) {
+  const response = await fetch(`/api/video/v1${path}`, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = body?.error?.message || body?.error || `请求失败：${response.status}`;
+    const error = new Error(detail);
+    error.code = body?.error?.code || "VIDEO_API_FAILED";
+    throw error;
+  }
+  return body;
+}
+
+function writeHeaders() {
+  return {
+    "content-type": "application/json",
+    "idempotency-key": crypto.randomUUID()
+  };
+}
+
+function projectScenes(items) {
+  let start = 0;
+  return items.map((scene, index) => {
+    const duration = Number(scene.duration_sec) || 1;
+    const projected = {
+      ...scene,
+      duration,
+      start,
+      end: start + duration,
+      color: SCENE_COLORS[index % SCENE_COLORS.length]
+    };
+    start += duration;
+    return projected;
+  });
+}
 
 function readLocal(key, fallback) {
   try {
@@ -123,7 +159,8 @@ function readTibaoProduct() {
       title: String(value.title || id),
       category: String(value.category || ""),
       brandName: String(value.brandName || ""),
-      shopId: String(value.shopId || "")
+      shopId: String(value.shopId || ""),
+      shopRegion: String(value.shopRegion || "").toUpperCase()
     };
   } catch {
     return null;
@@ -184,7 +221,7 @@ function Sidebar({ screen, onNavigate, onAccount }) {
   );
 }
 
-function Topbar({ screen, generated, onBack, onGenerate, onExport, onToast }) {
+function Topbar({ screen, generated, projectStatus, onBack, onGenerate, onExport, onToast }) {
   const editing = screen === "editor";
   return (
     <header className="topbar">
@@ -195,7 +232,7 @@ function Topbar({ screen, generated, onBack, onGenerate, onExport, onToast }) {
           </button>
         )}
         <strong>{editing ? "商品视频重制工作台" : "创建新重制项目"}</strong>
-        <span className="project-state demo-state">演示模式</span>
+        <span className="project-state demo-state">{projectStatus || "LOCAL ALPHA"}</span>
       </div>
       <div className="topbar-center" aria-label="保存状态">
         <span className="save-dot"></span>
@@ -214,12 +251,12 @@ function Topbar({ screen, generated, onBack, onGenerate, onExport, onToast }) {
           generated ? (
             <button type="button" className="primary-button" onClick={onExport}>
               <Icon name="download" size={16} />
-              演示导出
+              导出 Prompt 包
             </button>
           ) : (
             <button type="button" className="primary-button" onClick={onGenerate}>
               <Icon name="wand" size={16} />
-              模拟生成
+              生成分镜
             </button>
           )
         )}
@@ -228,7 +265,7 @@ function Topbar({ screen, generated, onBack, onGenerate, onExport, onToast }) {
   );
 }
 
-function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveVideo, linkedProduct, productImage, productFileName, hasProduct, onUpload, onRemoveProduct, onDemo, onAnalyze, formError, language, setLanguage, length, setLength }) {
+function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveVideo, linkedProduct, productImage, productFileName, hasProduct, onUpload, onRemoveProduct, onDemo, onAnalyze, submitting, formError, language, setLanguage, length, setLength }) {
   return (
     <section className="setup-screen" data-screen-label="新建重制项目">
       <div className="setup-wrap">
@@ -238,11 +275,11 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
           <p className="setup-lede">
             导入参考视频和商品素材。ReCut 会识别钩子、节奏、口播与商品露出时机，再把这套结构改写成你的版本。
           </p>
-          <div className="prototype-notice"><strong>当前为高保真演示</strong><span>结构分析、生成和导出暂不调用真实 AI 模型，也不会产出 MP4。</span></div>
+          <div className="prototype-notice"><strong>Phase A 已连接本地服务</strong><span>素材、项目和作业状态会真实持久化；当前使用 deterministic Fake Provider，只生成 Storyboard，不生成 MP4。</span></div>
           <div className="workflow-strip" aria-label="重制流程">
             <div className="workflow-step"><span>01 · INPUT</span><strong>导入参考与商品</strong></div>
             <div className="workflow-step"><span>02 · DECODE</span><strong>拆解爆款结构</strong></div>
-            <div className="workflow-step"><span>03 · REMIX</span><strong>生成可编辑成片</strong></div>
+            <div className="workflow-step"><span>03 · REMIX</span><strong>生成可编辑分镜</strong></div>
           </div>
         </div>
 
@@ -265,7 +302,7 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
             <div>
               <label className="field-label" htmlFor="video-url">
                 <span>参考视频链接</span>
-                <small>链接与本地 MP4 二选一</small>
+                <small>链接用于预览；Alpha 分析需本地 MP4</small>
               </label>
               <div className="url-field">
                 <Icon name="link" size={17} />
@@ -326,17 +363,16 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
 
             <div className="setting-line">
               <div className="compact-select">
-                <select aria-label="成片语言" value={language} onChange={(event) => setLanguage(event.target.value)}>
-                  <option>中文口播</option>
-                  <option>English voiceover</option>
-                  <option>无口播，仅字幕</option>
+                <select aria-label="目标语言" value={language} onChange={(event) => setLanguage(event.target.value)}>
+                  <option value="ms-MY">Bahasa Melayu · MY</option>
+                  <option value="en-MY">English · MY</option>
                 </select>
               </div>
               <div className="compact-select">
                 <select aria-label="目标时长" value={length} onChange={(event) => setLength(event.target.value)}>
-                  <option>自动匹配 · 25 秒</option>
-                  <option>精简版 · 15 秒</option>
-                  <option>完整演示 · 35 秒</option>
+                  <option value="auto">跟随参考视频</option>
+                  <option value="15">精简版 · 15 秒</option>
+                  <option value="35">完整演示 · 35 秒</option>
                 </select>
               </div>
             </div>
@@ -346,9 +382,9 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
               <span>我确认拥有所上传素材的使用权。系统只迁移视频结构，不复制原作者的人脸、声音、品牌标识或受版权保护的音乐。</span>
             </div>
             {formError && <div className="form-error" role="alert">{formError}</div>}
-            <button type="button" className="primary-button analyze-button" onClick={onAnalyze}>
+            <button type="button" className="primary-button analyze-button" onClick={onAnalyze} disabled={submitting}>
               <Icon name="spark" size={17} />
-              分析爆款结构
+              {submitting ? "正在上传并创建作业…" : "分析爆款结构"}
               <Icon name="chevron" size={15} />
             </button>
           </div>
@@ -358,13 +394,16 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
   );
 }
 
-function AnalysisScreen({ progress }) {
+function AnalysisScreen({ stage }) {
   const steps = [
-    { label: "识别镜头与节奏", threshold: 18, finish: 42, time: "00:07" },
-    { label: "提取口播与字幕", threshold: 40, finish: 68, time: "00:12" },
-    { label: "标记商品露出时机", threshold: 65, finish: 86, time: "00:17" },
-    { label: "生成重制脚本", threshold: 84, finish: 100, time: "00:21" }
+    { id: "starting", label: "领取分析作业" },
+    { id: "reading_inputs", label: "校验素材与项目快照" },
+    { id: "fake_provider", label: "生成 Source / Product / Adapted Blueprint" },
+    { id: "validating_output", label: "校验并持久化 Storyboard" }
   ];
+  const stageOrder = ["queued", "starting", "reading_inputs", "fake_provider", "validating_output", "completed"];
+  const currentIndex = Math.max(0, stageOrder.indexOf(stage));
+  const progress = Math.round((currentIndex / (stageOrder.length - 1)) * 100);
   return (
     <section className="analysis-screen" data-screen-label="视频结构分析">
       <div className="analysis-grid"></div>
@@ -375,18 +414,19 @@ function AnalysisScreen({ progress }) {
         </div>
         <div className="analysis-copy">
           <h2>正在读取爆款 DNA</h2>
-          <p>逐帧识别结构、节奏与说服路径，预计不到半分钟。</p>
+          <p>页面进度来自服务端持久化阶段；刷新后仍可从同一 Job 恢复。</p>
           <div className="analysis-progress"><i style={{ width: `${progress}%` }}></i></div>
-          <div className="analysis-percent">{String(progress).padStart(2, "0")}% · ANALYZING</div>
+          <div className="analysis-percent">{String(progress).padStart(2, "0")}% · {String(stage || "queued").toUpperCase()}</div>
           <div className="analysis-steps">
             {steps.map((step) => {
-              const done = progress >= step.finish;
-              const active = progress >= step.threshold && !done;
+              const index = stageOrder.indexOf(step.id);
+              const done = currentIndex > index;
+              const active = currentIndex === index;
               return (
                 <div key={step.label} className={`analysis-step ${done ? "done" : active ? "active" : ""}`}>
                   <span className="step-indicator">{done ? <Icon name="check" size={9} /> : null}</span>
                   <span>{step.label}</span>
-                  <small>{done ? "DONE" : active ? "RUN" : step.time}</small>
+                  <small>{done ? "DONE" : active ? "RUN" : "WAIT"}</small>
                 </div>
               );
             })}
@@ -622,8 +662,8 @@ function GenerateModal({ progress }) {
       <div className="generate-modal">
         <div className="modal-head">
           <div>
-            <h3 id="render-title">正在模拟生成重制版本</h3>
-            <p>演示商品画面、口播、字幕和节奏模板的组合过程。</p>
+            <h3 id="render-title">正在生成 Storyboard</h3>
+            <p>按当前 Blueprint 重新组织分镜字段与模型中立 Prompt。</p>
           </div>
           <span className="project-state">720 × 1280</span>
         </div>
@@ -633,7 +673,7 @@ function GenerateModal({ progress }) {
           </div>
           <div className="render-line"><i style={{ width: `${progress}%` }}></i></div>
         </div>
-        <div className="render-meta"><span>RENDER · V2</span><strong>{progress}%</strong></div>
+        <div className="render-meta"><span>STORYBOARD · LOCAL</span><strong>{progress}%</strong></div>
       </div>
     </div>
   );
@@ -651,8 +691,8 @@ function Toast({ title, message }) {
 function AccountMenu({ onClose, onToast }) {
   return (
     <div className="account-menu">
-      <div className="account-summary"><strong>本地运营账户</strong><span>Tibao 视频工作台 · 演示</span></div>
-      <button type="button" onClick={() => { onToast("演示模式", "当前版本不统计真实模型用量"); onClose(); }}><Icon name="folder" size={14} /> 查看空间说明</button>
+      <div className="account-summary"><strong>本地运营账户</strong><span>Tibao 视频工作台 · Phase A</span></div>
+      <button type="button" onClick={() => { onToast("本地 Alpha", "当前使用 Fake Provider，但项目、素材、Job 和额度都是真实台账"); onClose(); }}><Icon name="folder" size={14} /> 查看空间说明</button>
       <button type="button" onClick={() => { openTweaks(); onClose(); }}><Icon name="settings" size={14} /> 原型风格设置</button>
     </div>
   );
@@ -661,16 +701,21 @@ function AccountMenu({ onClose, onToast }) {
 function App() {
   const [tweaks, setTweak] = useTweaks(window.TWEAK_DEFAULTS);
   const linkedProduct = React.useMemo(() => readTibaoProduct(), []);
-  const [screen, setScreen] = React.useState(() => linkedProduct ? "setup" : readLocal("recut:screen", "setup"));
+  const [screen, setScreen] = React.useState("setup");
   const [url, setUrl] = React.useState("");
   const [referenceVideo, setReferenceVideo] = React.useState(null);
+  const [productFile, setProductFile] = React.useState(null);
   const [productImage, setProductImage] = React.useState("");
   const [productFileName, setProductFileName] = React.useState("");
   const [hasProduct, setHasProduct] = React.useState(false);
-  const [language, setLanguage] = React.useState("中文口播");
-  const [length, setLength] = React.useState("自动匹配 · 25 秒");
+  const [language, setLanguage] = React.useState("ms-MY");
+  const [length, setLength] = React.useState("auto");
   const [formError, setFormError] = React.useState("");
-  const [analysisProgress, setAnalysisProgress] = React.useState(0);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [project, setProject] = React.useState(null);
+  const [analysisJobId, setAnalysisJobId] = React.useState("");
+  const [analysisStage, setAnalysisStage] = React.useState("queued");
+  const [persistedScenes, setPersistedScenes] = React.useState([]);
   const [currentTime, setCurrentTime] = React.useState(() => readLocal("recut:time", 0));
   const [playing, setPlaying] = React.useState(false);
   const [sceneEdits, setSceneEdits] = React.useState({});
@@ -683,7 +728,10 @@ function App() {
   const videoFileRef = React.useRef(null);
   const toastTimer = React.useRef(null);
 
-  const scenes = React.useMemo(() => TIMED_SCENES.map((scene) => ({ ...scene, ...(sceneEdits[scene.id] || {}) })), [sceneEdits]);
+  const scenes = React.useMemo(() => {
+    const source = persistedScenes.length > 0 ? persistedScenes : TIMED_SCENES;
+    return source.map((scene) => ({ ...scene, ...(sceneEdits[scene.id] || {}) }));
+  }, [persistedScenes, sceneEdits]);
   const activeScene = scenes.find((scene) => currentTime >= scene.start && currentTime < scene.end) || scenes[scenes.length - 1];
 
   const showToast = React.useCallback((title, message) => {
@@ -693,8 +741,34 @@ function App() {
   }, []);
 
   React.useEffect(() => {
-    writeLocal("recut:screen", screen === "analyzing" ? "setup" : screen);
-  }, [screen]);
+    if (linkedProduct) return undefined;
+    const savedProjectId = readLocal("recut:project-id", "");
+    if (!savedProjectId) return undefined;
+    let cancelled = false;
+    Promise.all([
+      videoApi(`/projects/${savedProjectId}`),
+      videoApi(`/projects/${savedProjectId}/scenes`)
+    ]).then(([aggregate, sceneResponse]) => {
+      if (cancelled) return;
+      setProject(aggregate.project);
+      const restoredScenes = projectScenes(sceneResponse.scenes || []);
+      if (restoredScenes.length > 0) {
+        setPersistedScenes(restoredScenes);
+        setGenerated(true);
+        setScreen("editor");
+        return;
+      }
+      const running = (aggregate.jobs || []).find((job) => ["queued", "running", "retry_wait"].includes(job.status));
+      if (running) {
+        setAnalysisJobId(running.id);
+        setAnalysisStage(running.progress_stage || running.status);
+        setScreen("analyzing");
+      }
+    }).catch(() => {
+      localStorage.removeItem("recut:project-id");
+    });
+    return () => { cancelled = true; };
+  }, [linkedProduct]);
 
   React.useEffect(() => {
     writeLocal("recut:time", Number(currentTime.toFixed(2)));
@@ -716,25 +790,48 @@ function App() {
   }, [playing]);
 
   React.useEffect(() => {
-    if (screen !== "analyzing") return undefined;
-    setAnalysisProgress(0);
-    const timer = window.setInterval(() => {
-      setAnalysisProgress((value) => {
-        const step = value < 30 ? 5 : value < 72 ? 3 : 2;
-        const next = Math.min(100, value + step);
-        if (next === 100) {
-          window.clearInterval(timer);
-          window.setTimeout(() => {
-            setCurrentTime(0);
-            setScreen("editor");
-            showToast("结构拆解完成", "已生成 6 个可编辑的说服节点");
-          }, 420);
+    if (screen !== "analyzing" || !analysisJobId) return undefined;
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      try {
+        const response = await videoApi(`/jobs/${analysisJobId}`);
+        if (cancelled) return;
+        const job = response.job;
+        setAnalysisStage(job.progress_stage || job.status || "queued");
+        if (job.status === "succeeded") {
+          const [aggregate, sceneResponse] = await Promise.all([
+            videoApi(`/projects/${job.project_id}`),
+            videoApi(`/projects/${job.project_id}/scenes`)
+          ]);
+          if (cancelled) return;
+          setProject(aggregate.project);
+          setPersistedScenes(projectScenes(sceneResponse.scenes || []));
+          setGenerated(true);
+          setCurrentTime(0);
+          setScreen("editor");
+          showToast("结构拆解完成", `服务端已持久化 ${(sceneResponse.scenes || []).length} 个可编辑 Storyboard`);
+          return;
         }
-        return next;
-      });
-    }, 120);
-    return () => window.clearInterval(timer);
-  }, [screen, showToast]);
+        if (["failed", "cancelled", "superseded"].includes(job.status)) {
+          setScreen("setup");
+          setFormError(job.error_message || `分析作业进入 ${job.status} 状态，请重试。`);
+          return;
+        }
+        timer = window.setTimeout(poll, 450);
+      } catch (error) {
+        if (!cancelled) {
+          setScreen("setup");
+          setFormError(error.message || "读取分析作业失败");
+        }
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [screen, analysisJobId, showToast]);
 
   React.useEffect(() => {
     if (!rendering) return undefined;
@@ -747,7 +844,7 @@ function App() {
           window.setTimeout(() => {
             setRendering(false);
             setGenerated(true);
-            showToast("演示生成完成", "当前仅展示交互结果，未调用模型或生成 MP4");
+            showToast("分镜生成完成", "当前输出为 Storyboard 与模型中立 Prompt，不会生成 MP4");
           }, 360);
         }
         return next;
@@ -761,7 +858,30 @@ function App() {
     if (productImage) URL.revokeObjectURL(productImage);
   }, [productImage]);
 
-  const handleAnalyze = () => {
+  const uploadAsset = async (projectId, role, file) => {
+    const contentType = file.type || (role === "source_video" ? "video/mp4" : "image/png");
+    const session = await videoApi(`/projects/${projectId}/uploads`, {
+      method: "POST",
+      headers: writeHeaders(),
+      body: JSON.stringify({
+        role,
+        content_type: contentType,
+        bytes: file.size
+      })
+    });
+    const uploadResponse = await fetch(session.url, {
+      method: "PUT",
+      headers: session.required_headers,
+      body: file
+    });
+    const uploadBody = await uploadResponse.json().catch(() => ({}));
+    if (!uploadResponse.ok) {
+      throw new Error(uploadBody?.error?.message || uploadBody?.error || `素材上传失败：${uploadResponse.status}`);
+    }
+    await videoApi(`/uploads/${session.upload_id}/complete`, { method: "POST" });
+  };
+
+  const handleAnalyze = async () => {
     if (!url.trim() && !referenceVideo) {
       setFormError("请粘贴参考视频链接或上传本地 MP4。");
       return;
@@ -770,22 +890,79 @@ function App() {
       setFormError("链接需要以 http:// 或 https:// 开头。");
       return;
     }
-    if (!hasProduct) {
+    if (url.trim() && !referenceVideo) {
+      setFormError("Phase A 会校验链接但不会下载媒体，请上传本地 MP4 后继续。");
+      return;
+    }
+    if (!hasProduct || !productFile) {
       setFormError("请至少上传一张商品图片，或载入演示素材。");
       return;
     }
     setFormError("");
-    setScreen("analyzing");
+    setSubmitting(true);
+    try {
+      const catalogContext = linkedProduct ? {
+        shop_id: linkedProduct.shopId,
+        product_id: linkedProduct.id,
+        title: linkedProduct.title,
+        category: linkedProduct.category,
+        brand: linkedProduct.brandName,
+        shop_region: linkedProduct.shopRegion
+      } : undefined;
+      const created = await videoApi("/projects", {
+        method: "POST",
+        headers: writeHeaders(),
+        body: JSON.stringify({
+          name: linkedProduct?.title || `ReCut ${new Date().toLocaleDateString()}`,
+          catalog_context: catalogContext,
+          target_market: linkedProduct?.shopRegion || "MY",
+          language,
+          target_duration_sec: length === "auto" ? null : Number(length),
+          similarity_score: 60
+        })
+      });
+      setProject(created.project);
+      writeLocal("recut:project-id", created.project.id);
+      await uploadAsset(created.project.id, "source_video", referenceVideo);
+      await uploadAsset(created.project.id, "product_image", productFile);
+      const refreshed = await videoApi(`/projects/${created.project.id}`);
+      setProject(refreshed.project);
+      const run = await videoApi(`/projects/${created.project.id}/analysis-runs`, {
+        method: "POST",
+        headers: writeHeaders(),
+        body: JSON.stringify({
+          expected_project_revision: refreshed.project.revision,
+          rights_acknowledgement: {
+            accepted: true,
+            policy_version: "2026-08-15"
+          }
+        })
+      });
+      setAnalysisJobId(run.job.id);
+      setAnalysisStage(run.job.progress_stage || "queued");
+      setScreen("analyzing");
+    } catch (error) {
+      setFormError(error.message || "创建视频分析作业失败");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDemo = () => {
-    setUrl("https://www.tiktok.com/@demo/video/0000000000000000000");
-    setReferenceVideo(null);
+    const demoVideo = new File([
+      new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0])
+    ], "recut-phase-a-demo.mp4", { type: "video/mp4" });
+    const demoImage = new File([
+      new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+    ], "glowdrop-main.png", { type: "image/png" });
+    setUrl("");
+    setReferenceVideo(demoVideo);
+    setProductFile(demoImage);
     setProductImage("");
     setProductFileName("glowdrop-main.png");
     setHasProduct(true);
     setFormError("");
-    showToast("演示素材已载入", "现在可以直接分析完整流程");
+    showToast("Phase A fixture 已载入", "点击分析后会真实上传、入队并由 Fake Provider 生成分镜");
   };
 
   const handleVideoFile = (event) => {
@@ -797,15 +974,15 @@ function App() {
       event.target.value = "";
       return;
     }
-    if (file.size > 200 * 1024 * 1024) {
-      showToast("参考视频过大", "演示版单个 MP4 不能超过 200 MB");
+    if (file.size > 150 * 1024 * 1024) {
+      showToast("参考视频过大", "Alpha 单个视频不能超过 150 MB");
       event.target.value = "";
       return;
     }
     setReferenceVideo(file);
     setUrl("");
     setFormError("");
-    showToast("参考视频已加入", `${file.name} 仅保存在当前浏览器会话中`);
+    showToast("参考视频已加入", `${file.name} 会在开始分析时上传到本地私有目录`);
     event.target.value = "";
   };
 
@@ -817,11 +994,12 @@ function App() {
       return;
     }
     if (productImage) URL.revokeObjectURL(productImage);
+    setProductFile(file);
     setProductImage(URL.createObjectURL(file));
     setProductFileName(file.name);
     setHasProduct(true);
     setFormError("");
-    showToast("商品图片已加入", `${file.name} 将用于全部商品镜头`);
+    showToast("商品图片已加入", `${file.name} 会作为项目输入上传并记录校验和`);
     event.target.value = "";
   };
 
@@ -836,7 +1014,7 @@ function App() {
     } else if (target === "assets") {
       showToast("素材库原型", "下一版可扩展为独立的品牌资产中心");
     } else if (target === "history") {
-      showToast("历史版本", generated ? "当前包含 V1 脚本版与 V2 成片版" : "生成视频后会自动保存版本");
+      showToast("历史版本", generated ? "当前包含持久化的 Blueprint 与 Storyboard revision" : "生成分镜后会保存版本");
     }
   };
 
@@ -866,9 +1044,10 @@ function App() {
       <Topbar
         screen={screen}
         generated={generated}
+        projectStatus={screen === "analyzing" ? analysisStage : project?.status}
         onBack={() => { setPlaying(false); setScreen("setup"); }}
         onGenerate={() => setRendering(true)}
-        onExport={() => showToast("演示版暂不导出", "接入真实模型和合成服务后才会生成 MP4")}
+        onExport={() => showToast("Prompt 包将在 Phase B 开放", "V1 导出 ZIP / Markdown / JSON；不会生成或导出 MP4")}
         onToast={showToast}
       />
       <div className="workspace">
@@ -884,9 +1063,10 @@ function App() {
             productFileName={productFileName}
             hasProduct={hasProduct}
             onUpload={() => fileRef.current?.click()}
-            onRemoveProduct={() => { if (productImage) URL.revokeObjectURL(productImage); setProductImage(""); setProductFileName(""); setHasProduct(false); }}
+            onRemoveProduct={() => { if (productImage) URL.revokeObjectURL(productImage); setProductFile(null); setProductImage(""); setProductFileName(""); setHasProduct(false); }}
             onDemo={handleDemo}
             onAnalyze={handleAnalyze}
+            submitting={submitting}
             formError={formError}
             language={language}
             setLanguage={setLanguage}
@@ -894,7 +1074,7 @@ function App() {
             setLength={setLength}
           />
         )}
-        {screen === "analyzing" && <AnalysisScreen progress={analysisProgress} />}
+        {screen === "analyzing" && <AnalysisScreen stage={analysisStage} />}
         {screen === "editor" && (
           <EditorScreen
             scenes={scenes}
@@ -909,7 +1089,7 @@ function App() {
             onSeek={(time) => setCurrentTime(Math.max(0, Math.min(TOTAL_DURATION - 0.01, time)))}
             onUpdateScene={updateScene}
             onUpload={() => fileRef.current?.click()}
-            onRegenerate={() => showToast("当前场景已加入队列", "演示版保留原结构，仅更新表达和画面")}
+            onRegenerate={() => showToast("单镜重生成将在 Phase B 开放", "Phase A 已完成项目级作业、租约、持久化与恢复骨架")}
             onToast={showToast}
           />
         )}
