@@ -58,3 +58,7 @@ rejected → re-capture and re-match (no direct retry)
 ```
 
 Running tasks use a lease. If the process or popup disappears, an expired lease returns the task to `ready` instead of creating a second task.
+
+## ReCut video domain
+
+The AI video workspace is currently a frontend prototype. Its implementable V1 backend design is documented in [video-backend-design.md](video-backend-design.md). The video domain reuses the repository's Fastify and durable-lease patterns while keeping media assets, jobs, tables, provider adapters, and workers separate from TikTok opportunity submission.
