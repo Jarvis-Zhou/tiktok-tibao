@@ -632,3 +632,137 @@
 }
 
 .script-note .icon { flex: 0 0 auto; color: var(--signal); }
+
+.analysis-evidence-card {
+  display: grid;
+  gap: 5px;
+  margin: 11px 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.analysis-evidence-card small,
+.analysis-evidence-card span {
+  color: var(--muted-2);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.analysis-evidence-card strong {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.scene-row-copy .scene-state {
+  display: block;
+  margin-top: 5px;
+  color: #9eb3ca;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 7px;
+}
+
+.scene-row-copy .state-ready { color: var(--signal); }
+.scene-row-copy .state-failed,
+.scene-row-copy .state-stale { color: #ff927d; }
+.scene-row-copy .state-needs_review { color: #f0c86f; }
+
+.mini-scene-art > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.storyboard-preview-image {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.preview-generation-state {
+  position: absolute;
+  top: 4%;
+  right: 6%;
+  z-index: 16;
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background: rgba(10, 13, 20, 0.58);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 6px;
+}
+
+.preview-generation-state.state-needs_review { color: #f0c86f; }
+.preview-generation-state.state-failed,
+.preview-generation-state.state-stale { color: #ff927d; }
+
+.evidence-list {
+  display: grid;
+  gap: 7px;
+}
+
+.evidence-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111827;
+}
+
+.evidence-item strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+}
+
+.evidence-item span,
+.empty-evidence {
+  color: var(--muted-2);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.product-facts {
+  display: grid;
+  gap: 6px;
+}
+
+.product-facts > span {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: #111827;
+}
+
+.product-facts small {
+  color: var(--muted-2);
+  font-size: 8px;
+}
+
+.product-facts strong {
+  overflow: hidden;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 7px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-empty-state {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.editor-empty-state strong { color: var(--text); font-size: 16px; }

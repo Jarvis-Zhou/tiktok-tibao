@@ -49,46 +49,38 @@ function ProductArt({ image, compact = false, variant = "mint" }) {
     return <img className="product-uploaded-image" src={image} alt="已上传的商品素材" />;
   }
   return (
-    <div className={`product-art ${compact ? "compact" : ""} ${variant}`} aria-label="GlowDrop 商品包装示意图">
-      <div className="product-halo"></div>
-      <div className="product-shadow"></div>
-      <div className="bottle-cap"><span></span></div>
-      <div className="bottle-neck"></div>
-      <div className="bottle-body">
-        <div className="bottle-shine"></div>
-        <div className="bottle-label">
-          <small>GLOWDROP</small>
-          <strong>DEW 03</strong>
-          <span>barrier serum</span>
-        </div>
-      </div>
-      <div className="product-orbit orbit-one"></div>
-      <div className="product-orbit orbit-two"></div>
+    <div className={`product-art product-missing ${compact ? "compact" : ""} ${variant}`} aria-label="尚未载入商品图片">
+      <Icon name="upload" size={compact ? 12 : 22} />
+      {!compact && <span>NO PRODUCT IMAGE</span>}
     </div>
   );
 }
 
-function ReferenceFrame({ mini = false, playing = false }) {
+function ReferenceFrame({ mini = false, playing = false, source = "" }) {
+  if (source) {
+    return (
+      <div className={`reference-frame real-source ${mini ? "mini" : ""}`}>
+        <video src={source} muted playsInline loop autoPlay={playing} controls={!playing} preload="metadata"></video>
+        <div className="ref-play"><Icon name={playing ? "pause" : "play"} size={mini ? 12 : 18} /></div>
+      </div>
+    );
+  }
   return (
-    <div className={`reference-frame ${mini ? "mini" : ""}`}>
-      <div className="ref-wall"><span></span><span></span><span></span></div>
-      <div className="ref-table"></div>
-      <div className="ref-hand"></div>
-      <div className="ref-product"><i></i><b>DEW</b></div>
-      <div className="ref-caption">POV: 你的底妆终于不卡粉了</div>
-      {!mini && <div className="ref-creator">@daily.finds</div>}
+    <div className={`reference-frame reference-missing ${mini ? "mini" : ""}`}>
+      <Icon name="film" size={mini ? 16 : 30} />
+      {!mini && <span>等待参考视频</span>}
       <div className="ref-play"><Icon name={playing ? "pause" : "play"} size={mini ? 12 : 18} /></div>
     </div>
   );
 }
 
-function MiniSceneArt({ scene, active }) {
+function MiniSceneArt({ scene, active, index = 0 }) {
   const palette = ["orange", "blue", "mint", "violet", "rose", "amber"];
   return (
-    <div className={`mini-scene-art ${palette[scene.id - 1]} ${active ? "active" : ""}`}>
-      <div className="mini-frame-lines"></div>
-      <span>{String(scene.id).padStart(2, "0")}</span>
-      {scene.id === 3 || scene.id === 4 ? <ProductArt compact={true} /> : <div className="mini-type">{scene.short}</div>}
+    <div className={`mini-scene-art ${palette[index % palette.length]} ${active ? "active" : ""}`}>
+      {scene.storyboardUrl ? <img src={scene.storyboardUrl} alt="" /> : <div className="mini-frame-lines"></div>}
+      <span>{String(index + 1).padStart(2, "0")}</span>
+      {!scene.storyboardUrl && <div className="mini-type">{scene.short}</div>}
     </div>
   );
 }

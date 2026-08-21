@@ -272,22 +272,30 @@ export class TibaoDatabase {
   transaction<T>(callback: () => NonPromise<T>): NonPromise<T> {
     if (this.transactionActive) throw new Error("Nested database transactions are not allowed");
     this.transactionActive = true;
-    this.raw.exec("BEGIN IMMEDIATE");
     try {
-      const result = callback();
-      if (
-        result !== null &&
-        (typeof result === "object" || typeof result === "function") &&
-        "then" in result &&
-        typeof (result as { then?: unknown }).then === "function"
-      ) {
-        throw new TypeError("Database transaction callbacks must be synchronous");
+      this.raw.exec("BEGIN IMMEDIATE");
+      try {
+        const result = callback();
+        if (
+          result !== null &&
+          (typeof result === "object" || typeof result === "function") &&
+          "then" in result &&
+          typeof (result as { then?: unknown }).then === "function"
+        ) {
+          throw new TypeError("Database transaction callbacks must be synchronous");
+        }
+        this.raw.exec("COMMIT");
+        return result;
+      } catch (error) {
+        try {
+          this.raw.exec("ROLLBACK");
+        } catch {
+          // SQLite can automatically roll back on fatal write errors such as
+          // SQLITE_FULL. Preserve the original error instead of replacing it
+          // with "cannot rollback - no transaction is active".
+        }
+        throw error;
       }
-      this.raw.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.raw.exec("ROLLBACK");
-      throw error;
     } finally {
       this.transactionActive = false;
     }

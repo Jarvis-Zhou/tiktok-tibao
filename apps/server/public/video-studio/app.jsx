@@ -1,98 +1,3 @@
-const SCENES = [
-  {
-    id: 1,
-    short: "HOOK",
-    label: "钩子",
-    title: "反常识开场",
-    description: "先指出错误习惯，制造信息缺口",
-    duration: 2.6,
-    color: "#d95e42",
-    headline: "别再把精华直接抹上脸",
-    accent: "直接抹",
-    overlay: "停留峰值 · 0.8s",
-    caption: "大多数人第一步就做错了",
-    script: "别再把精华直接抹上脸，大多数人第一步就做错了。"
-  },
-  {
-    id: 2,
-    short: "PAIN",
-    label: "痛点",
-    title: "放大真实困扰",
-    description: "用具体结果替代泛泛的问题描述",
-    duration: 3.2,
-    color: "#3b6486",
-    headline: "越补水，底妆反而越斑驳？",
-    accent: "越斑驳",
-    overlay: "问题共鸣 · 3 连击",
-    caption: "不是缺水，是屏障留不住水",
-    script: "越补水，底妆反而越斑驳？问题不是缺水，而是屏障留不住水。"
-  },
-  {
-    id: 3,
-    short: "REVEAL",
-    label: "亮相",
-    title: "商品第一次露出",
-    description: "先给解决机制，再显示产品名称",
-    duration: 3.8,
-    color: "#3f8078",
-    headline: "先锁水，再让皮肤吃进去",
-    accent: "先锁水",
-    overlay: "商品露出 · 58% 画面",
-    caption: "GlowDrop 双相屏障精华",
-    script: "先锁住水分，再让皮肤慢慢吃进去。这瓶是我最近在用的 GlowDrop。"
-  },
-  {
-    id: 4,
-    short: "DEMO",
-    label: "演示",
-    title: "三步使用演示",
-    description: "动作跟随节拍，每个步骤只讲一件事",
-    duration: 5.2,
-    color: "#655b91",
-    headline: "摇匀 · 按压 · 轻拍 10 秒",
-    accent: "10 秒",
-    overlay: "动作节拍 · 116 BPM",
-    caption: "两泵就够，别反复揉搓",
-    script: "摇匀、按压两泵，再轻拍十秒。别反复揉搓，让它自己成膜。"
-  },
-  {
-    id: 5,
-    short: "PROOF",
-    label: "证据",
-    title: "即时结果对比",
-    description: "用近景质感与时间标签建立可信度",
-    duration: 6,
-    color: "#9b5671",
-    headline: "上妆 8 小时，鼻翼还是服帖",
-    accent: "8 小时",
-    overlay: "Before / After · 同光线",
-    caption: "下午 6:40 实拍，没有补妆",
-    script: "这是上妆八小时后的鼻翼，下午六点四十实拍，中间没有补妆。"
-  },
-  {
-    id: 6,
-    short: "CTA",
-    label: "收口",
-    title: "低压力行动号召",
-    description: "复述核心收益，引导查看商品详情",
-    duration: 4.2,
-    color: "#a9793c",
-    headline: "想要服帖底妆，先把屏障养好",
-    accent: "先养好",
-    overlay: "CTA · 商品锚点",
-    caption: "点开商品卡，先看你的肤质适不适合",
-    script: "想要服帖底妆，先把屏障养好。点开商品卡，看看你的肤质适不适合。"
-  }
-];
-
-const TOTAL_DURATION = SCENES.reduce((sum, scene) => sum + scene.duration, 0);
-let cursor = 0;
-const TIMED_SCENES = SCENES.map((scene) => {
-  const timed = { ...scene, start: cursor, end: cursor + scene.duration };
-  cursor += scene.duration;
-  return timed;
-});
-
 const AUDIO_BARS = [8, 16, 10, 22, 14, 28, 18, 9, 24, 15, 30, 20, 11, 26, 17, 8, 21, 13, 27, 16, 9, 23, 12, 29, 18, 10, 25, 14, 20, 8, 24, 16, 11, 28, 18, 9, 22, 13, 26, 15, 10, 21, 12, 24, 16, 9, 19, 12, 22, 14, 8, 18, 11, 20, 13, 8, 16, 10, 18, 12];
 const SCENE_COLORS = ["#d95e42", "#3b6486", "#3f8078", "#655b91", "#9b5671", "#a9793c"];
 const DEMO_VIDEO_BASE64 = "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM1bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAC7gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmB0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAC7gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAcAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAu4AACAAAABAAAAAAHYbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAwABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABg21pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUNzdGJsAAAAl3N0c2QAAAAAAAAAAQAAAIdhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAHABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAMWF2Y0MBZAAK/+EAGGdkAAqs2VX7wEQAAAMABAAAAwAIPEiWWAEABmjr48siwAAAABhzdHRzAAAAAAAAAAEAAAADAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAKGN0dHMAAAAAAAAAAwAAAAEAAIAAAAAAAQAAwAAAAAABAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAwAAAAEAAAAgc3RzegAAAAAAAAAAAAAAAwAAAs4AAAAMAAAADAAAABRzdGNvAAAAAAAAAAEAAANlAAAAYXVkdGEAAABZbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAsaWxzdAAAACSpdG9vAAAAHGRhdGEAAAABAAAAAExhdmY1Ni40LjEwMQAAAAhmcmVlAAAC7m1kYXQAAAKuBgX//6rcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTQyIHIyNDkxIDI0ZTRmZWQgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDE0IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MTIgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAYZYiEABf//u6CvgU3X8QPwzzx+tAhUKXxAAAACEGaImxBX/7cAAAACAGeQXkFf1RB";
@@ -117,27 +22,99 @@ async function videoApi(path, options = {}) {
   return body;
 }
 
+function createIdempotencyKey() {
+  const cryptoApi = window.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+  }
+
+  return `tibao-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
 function writeHeaders() {
   return {
     "content-type": "application/json",
-    "idempotency-key": crypto.randomUUID()
+    "idempotency-key": createIdempotencyKey()
   };
 }
 
-function projectScenes(items) {
+function artifactData(analysis, key) {
+  return analysis?.[key]?.data || null;
+}
+
+function assetContentUrl(assetId) {
+  return assetId ? `/api/video/v1/assets/${encodeURIComponent(assetId)}/content` : "";
+}
+
+function projectScenes(items, analysis) {
+  const adapted = artifactData(analysis, "adapted_blueprint");
+  const source = artifactData(analysis, "source_blueprint");
+  const adaptedScenes = Array.isArray(adapted?.scenes) ? adapted.scenes : [];
+  const sourceShots = Array.isArray(source?.shots) ? source.shots : [];
   let start = 0;
   return items.map((scene, index) => {
-    const duration = Number(scene.duration_sec) || 1;
+    const adaptedScene = adaptedScenes.find((candidate) => candidate.scene_id === scene.id) || adaptedScenes[index] || null;
+    const declaredStart = Number(adaptedScene?.start_sec);
+    const declaredEnd = Number(adaptedScene?.end_sec);
+    const hasDeclaredTiming = Number.isFinite(declaredStart) && Number.isFinite(declaredEnd) && declaredEnd > declaredStart;
+    const duration = hasDeclaredTiming ? declaredEnd - declaredStart : Number(scene.duration_sec) || 1;
+    const sceneStart = hasDeclaredTiming ? declaredStart : start;
+    const sceneEnd = hasDeclaredTiming ? declaredEnd : sceneStart + duration;
+    const sourceShotIds = Array.isArray(adaptedScene?.source_shot_ids) ? adaptedScene.source_shot_ids : [];
+    const matchedSourceShots = sourceShots.filter((shot) => sourceShotIds.includes(shot.shot_id));
+    const evidence = matchedSourceShots.flatMap((shot) => Array.isArray(shot.visual_evidence) ? shot.visual_evidence : []);
     const projected = {
       ...scene,
-      duration,
-      start,
-      end: start + duration,
+      duration: Math.max(0.01, duration),
+      start: sceneStart,
+      end: sceneEnd,
+      sourceShotIds,
+      sourceShots: matchedSourceShots,
+      evidence,
+      adaptationReason: adaptedScene?.adaptation_reason || "",
+      storyboardUrl: assetContentUrl(scene.storyboard_asset_id),
       color: SCENE_COLORS[index % SCENE_COLORS.length]
     };
-    start += duration;
+    start = sceneEnd;
     return projected;
   });
+}
+
+function projectDuration(scenes, analysis) {
+  const adapted = artifactData(analysis, "adapted_blueprint");
+  const source = artifactData(analysis, "source_blueprint");
+  const sceneEnd = scenes.reduce((maximum, scene) => Math.max(maximum, Number(scene.end) || 0), 0);
+  const adaptedDuration = Math.max(sceneEnd, Number(adapted?.target_duration_sec) || 0);
+  return adaptedDuration > 0 ? adaptedDuration : Math.max(Number(source?.duration_sec) || 0, 0.01);
+}
+
+function sceneStatusLabel(scene) {
+  const labels = {
+    not_generated: "未生成",
+    queued: "排队中",
+    generating: "生成中",
+    ready: "已就绪",
+    needs_review: "待人工检查",
+    failed: "生成失败",
+    stale: "需重新生成"
+  };
+  return labels[scene?.generation_status] || scene?.generation_status || "未知";
+}
+
+function productFactText(profile, key) {
+  const fact = profile?.[key];
+  const value = fact?.value;
+  const text = Array.isArray(value) ? value.join("、") : value == null ? "未识别" : String(value);
+  return `${text} · ${fact?.source || "unknown"} · ${Number.isFinite(Number(fact?.confidence)) ? Math.round(Number(fact.confidence) * 100) : 0}%`;
 }
 
 function readLocal(key, fallback) {
@@ -184,8 +161,9 @@ function hexToRgb(hex) {
   return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
 }
 
-function formatTime(seconds) {
-  const safe = Math.max(0, Math.min(TOTAL_DURATION, seconds));
+function formatTime(seconds, maximum = Number.POSITIVE_INFINITY) {
+  const safeMaximum = Number.isFinite(maximum) ? maximum : Number.POSITIVE_INFINITY;
+  const safe = Math.max(0, Math.min(safeMaximum, Number(seconds) || 0));
   const mins = Math.floor(safe / 60);
   const secs = Math.floor(safe % 60);
   const hundredths = Math.floor((safe % 1) * 100);
@@ -274,7 +252,9 @@ function Topbar({ screen, generated, projectStatus, onBack, onGenerate, onExport
   );
 }
 
-function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveVideo, linkedProduct, productImage, productFileName, hasProduct, onUpload, onRemoveProduct, onDemo, onAnalyze, submitting, formError, language, setLanguage, length, setLength }) {
+function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveVideo, linkedProduct, productImage, productFileName, hasProduct, onUpload, onRemoveProduct, onDemo, onAnalyze, submitting, formError, language, setLanguage, length, setLength, providerInfo }) {
+  const usingRealProvider = providerInfo?.provider === "openai";
+  const usingRealStoryboard = providerInfo?.storyboard_provider === "openai";
   return (
     <section className="setup-screen" data-screen-label="新建重制项目">
       <div className="setup-wrap">
@@ -284,7 +264,14 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
           <p className="setup-lede">
             导入参考视频和商品素材。ReCut 会识别钩子、节奏、口播与商品露出时机，再把这套结构改写成你的版本。
           </p>
-          <div className="prototype-notice"><strong>Phase B 本地链路</strong><span>FFmpeg 探测/抽帧、逐镜 Job/QC、版本锁定和 Prompt 包导出均真实运行；AI Provider 仍为 deterministic Fake Adapter，不生成 MP4。</span></div>
+          <div className={`prototype-notice ${usingRealProvider ? "real-provider" : "fake-provider"}`}>
+            <strong>{usingRealProvider ? "真实多模态 Provider" : "Fixture / Fake Provider"}</strong>
+            <span>
+              {usingRealProvider
+                ? `参考帧、商品像素${providerInfo.analysis_model ? `会发送到 ${providerInfo.analysis_model}` : "会发送到已配置模型"}；${providerInfo.transcription_provider === "local" ? `音频由本地 ${providerInfo.transcription_model || "Whisper"} 转写` : providerInfo.transcription_provider === "openai" ? `音频由 ${providerInfo.transcription_model || "已配置 ASR"} 转写` : "音频转写未启用"}；${usingRealStoryboard ? `Storyboard 使用 ${providerInfo.storyboard_model || "已配置图片模型"}` : "Storyboard 暂用本地占位图，仅提示词与结构由真实模型生成"}。结果仍需人工复核，不生成 MP4。`
+                : "FFmpeg、队列、持久化与导出是真实链路，但分析和 Storyboard 是确定性测试结果；请勿把它当作视频理解结论。"}
+            </span>
+          </div>
           <div className="workflow-strip" aria-label="重制流程">
             <div className="workflow-step"><span>01 · INPUT</span><strong>导入参考与商品</strong></div>
             <div className="workflow-step"><span>02 · DECODE</span><strong>拆解爆款结构</strong></div>
@@ -359,7 +346,7 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
                         <Icon name="close" size={13} />
                       </button>
                       <div className="product-file-meta">
-                        <span>{productFileName || "glowdrop-main.png"}</span>
+                        <span>{productFileName || "已上传商品图片"}</span>
                         <span>READY</span>
                       </div>
                     </>
@@ -403,29 +390,41 @@ function SetupScreen({ url, setUrl, referenceVideoName, onVideoUpload, onRemoveV
   );
 }
 
-function AnalysisScreen({ stage }) {
+function AnalysisScreen({ stage, sourcePreview, providerName }) {
   const steps = [
-    { id: "starting", label: "领取分析作业" },
-    { id: "reading_inputs", label: "校验素材与项目快照" },
-    { id: "fake_provider", label: "生成 Source / Product / Adapted Blueprint" },
-    { id: "validating_output", label: "校验并持久化 Storyboard" }
+    { id: "media_probe", label: "探测参考视频" },
+    { id: "frame_extraction", label: "抽取证据帧与音轨" },
+    { id: "visual_analysis", label: `${providerName || "AI"} 分析 Source / Product / Adapted Blueprint` },
+    { id: "schema_validation", label: "校验并持久化 Storyboard" }
   ];
-  const stageOrder = ["queued", "starting", "reading_inputs", "fake_provider", "validating_output", "completed"];
+  const stageOrder = [
+    "queued", "starting", "media_probe", "frame_extraction", "asr_skipped_no_audio", "asr_unconfigured",
+    "transcription_and_visual_analysis", "visual_analysis", "provider_submitted", "reconciling", "retry_wait",
+    "schema_validation", "completed"
+  ];
+  const waitingForRetry = stage === "reconciling" || stage === "retry_wait";
   const currentIndex = Math.max(0, stageOrder.indexOf(stage));
   const progress = Math.round((currentIndex / (stageOrder.length - 1)) * 100);
+  const stageLabel = stage === "reconciling"
+    ? "等待安全重试"
+    : stage === "retry_wait"
+      ? "等待重试"
+      : String(stage || "queued").toUpperCase();
   return (
     <section className="analysis-screen" data-screen-label="视频结构分析">
       <div className="analysis-grid"></div>
       <div className="analysis-card">
         <div className="analysis-video">
-          <ReferenceFrame playing={true} />
+          <ReferenceFrame playing={true} source={sourcePreview} />
           <div className="scan-line"></div>
         </div>
         <div className="analysis-copy">
-          <h2>正在读取爆款 DNA</h2>
-          <p>页面进度来自服务端持久化阶段；刷新后仍可从同一 Job 恢复。</p>
+          <h2>{waitingForRetry ? "模型响应超时，等待自动重试" : "正在读取爆款 DNA"}</h2>
+          <p>{waitingForRetry
+            ? "服务端已保留当前项目和素材，将自动重试；无需刷新或重新上传。"
+            : "页面进度来自服务端持久化阶段；刷新后仍可从同一 Job 恢复。"}</p>
           <div className="analysis-progress"><i style={{ width: `${progress}%` }}></i></div>
-          <div className="analysis-percent">{String(progress).padStart(2, "0")}% · {String(stage || "queued").toUpperCase()}</div>
+          <div className="analysis-percent">{String(progress).padStart(2, "0")}% · {stageLabel}</div>
           <div className="analysis-steps">
             {steps.map((step) => {
               const index = stageOrder.indexOf(step.id);
@@ -446,28 +445,45 @@ function AnalysisScreen({ stage }) {
   );
 }
 
-function StructurePanel({ scenes, activeSceneId, onSelectScene }) {
+function StructurePanel({ scenes, activeSceneId, onSelectScene, analysis }) {
+  const source = artifactData(analysis, "source_blueprint");
+  const providerRun = analysis?.provider_run || null;
+  const confidence = Number(source?.hook?.confidence);
+  const confidenceLabel = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : "—";
+  const duration = Number(source?.duration_sec) || projectDuration(scenes, analysis);
+  const shotCount = Array.isArray(source?.shots) ? source.shots.length : 0;
+  const pace = source?.pace ? String(source.pace).toUpperCase() : "—";
   return (
     <aside className="structure-panel">
       <div className="panel-heading">
         <div>
-          <h3>爆款结构</h3>
-          <p>已识别 6 个说服节点</p>
+          <h3>参考视频结构</h3>
+          <p>识别 {shotCount} 个源镜头 · 改编为 {scenes.length} 个场景</p>
         </div>
-        <div className="score-ring" aria-label="结构置信度 92%"><span>92%</span></div>
+        <div className="score-ring" aria-label={`Hook 置信度 ${confidenceLabel}`}><span>{confidenceLabel}</span></div>
       </div>
       <div className="structure-summary">
-        <div className="summary-cell"><small>时长</small><strong>00:25</strong></div>
-        <div className="summary-cell"><small>镜头</small><strong>14 CUTS</strong></div>
-        <div className="summary-cell"><small>节奏</small><strong>FAST</strong></div>
+        <div className="summary-cell"><small>源时长</small><strong>{formatTime(duration, duration).slice(0, 5)}</strong></div>
+        <div className="summary-cell"><small>镜头</small><strong>{shotCount || "—"} CUTS</strong></div>
+        <div className="summary-cell"><small>节奏</small><strong>{pace}</strong></div>
+      </div>
+      <div className="analysis-evidence-card">
+        <small>{providerRun ? `${providerRun.provider} · ${providerRun.model}` : "尚无 Provider 记录"}</small>
+        <strong>{source?.hook?.description || "尚未生成可验证的 Hook 分析"}</strong>
+        <span>
+          {Array.isArray(source?.hook?.evidence) && source.hook.evidence.length > 0
+            ? `证据时间：${source.hook.evidence.map((item) => `${Number(item.timestamp_sec || 0).toFixed(2)}s`).join("、")}`
+            : "没有证据时间点"}
+        </span>
       </div>
       <div className="scene-list">
-        {scenes.map((scene) => (
+        {scenes.map((scene, index) => (
           <button key={scene.id} type="button" className={`scene-row ${activeSceneId === scene.id ? "active" : ""}`} onClick={() => onSelectScene(scene)}>
-            <MiniSceneArt scene={scene} active={activeSceneId === scene.id} />
+            <MiniSceneArt scene={scene} active={activeSceneId === scene.id} index={index} />
             <span className="scene-row-copy">
               <strong>{scene.label} · {scene.title}</strong>
               <span>{scene.description}</span>
+              <small className={`scene-state state-${scene.generation_status}`}>{sceneStatusLabel(scene)} · QC {scene.qc_status || "pending"}</small>
             </span>
             <span className="scene-duration">{scene.duration.toFixed(1)}s</span>
           </button>
@@ -477,9 +493,11 @@ function StructurePanel({ scenes, activeSceneId, onSelectScene }) {
   );
 }
 
-function PreviewStage({ scenes, activeScene, currentTime, playing, onTogglePlay, onSeek, productImage, previewScale, showSafeArea, onToast }) {
-  const progress = (currentTime / TOTAL_DURATION) * 100;
-  const headlinePieces = activeScene.headline.split(activeScene.accent);
+function PreviewStage({ scenes, activeScene, currentTime, totalDuration, playing, onTogglePlay, onSeek, productImage, previewScale, showSafeArea, onToast }) {
+  const progress = (currentTime / totalDuration) * 100;
+  const accent = activeScene.accent && activeScene.headline.includes(activeScene.accent) ? activeScene.accent : "";
+  const headlinePieces = accent ? activeScene.headline.split(accent) : [activeScene.headline, ""];
+  const sceneNumber = scenes.findIndex((scene) => scene.id === activeScene.id) + 1;
   return (
     <main className="stage-panel">
       <div className="stage-toolbar">
@@ -487,7 +505,7 @@ function PreviewStage({ scenes, activeScene, currentTime, playing, onTogglePlay,
           <button type="button" className="tool-button" onClick={() => onToast("画布已适配", "预览已居中显示为 9:16") }>
             <Icon name="grid" size={14} /> 9:16
           </button>
-          <button type="button" className="tool-button square" aria-label="显示图层" onClick={() => onToast("共 8 个图层", "背景、商品、标题、字幕和安全区") }>
+          <button type="button" className="tool-button square" aria-label="查看证据映射" onClick={() => onToast("源镜头映射", activeScene.sourceShotIds.length ? activeScene.sourceShotIds.join("、") : "该场景没有源镜头引用") }>
             <Icon name="layers" size={14} />
           </button>
         </div>
@@ -509,15 +527,22 @@ function PreviewStage({ scenes, activeScene, currentTime, playing, onTogglePlay,
             ))}
           </div>
           <div className="phone-preview">
-            <div className={`preview-bg scene-${activeScene.id}`}></div>
+            <div className="preview-bg" style={{ background: `linear-gradient(145deg, ${activeScene.color}, #141b29 72%)` }}></div>
             {showSafeArea && <div className="safe-area"></div>}
-            <div className="preview-scene-label">SCENE {String(activeScene.id).padStart(2, "0")} · {activeScene.short}</div>
-            <div className="preview-grid-type">
-              {headlinePieces[0]}<span className="accent-word">{activeScene.accent}</span>{headlinePieces[1]}
-            </div>
-            <div className="preview-stat">{activeScene.overlay}</div>
-            <div className="preview-product"><ProductArt image={productImage} /></div>
-            <div className="preview-caption">{activeScene.caption}</div>
+            {activeScene.storyboardUrl ? (
+              <img className="storyboard-preview-image" src={activeScene.storyboardUrl} alt={`场景 ${sceneNumber} 已生成 Storyboard`} />
+            ) : (
+              <>
+                <div className="preview-grid-type">
+                  {headlinePieces[0]}{accent && <span className="accent-word">{accent}</span>}{headlinePieces[1]}
+                </div>
+                <div className="preview-stat">{activeScene.overlay}</div>
+                <div className="preview-product"><ProductArt image={productImage} /></div>
+                <div className="preview-caption">{activeScene.caption}</div>
+              </>
+            )}
+            <div className="preview-scene-label">SCENE {String(sceneNumber).padStart(2, "0")} · {activeScene.short}</div>
+            <div className={`preview-generation-state state-${activeScene.generation_status}`}>{sceneStatusLabel(activeScene)}</div>
             <div className="preview-progress"><i style={{ width: `${progress}%` }}></i></div>
           </div>
         </div>
@@ -527,7 +552,7 @@ function PreviewStage({ scenes, activeScene, currentTime, playing, onTogglePlay,
         <button type="button" className="play-button" aria-label={playing ? "暂停" : "播放"} onClick={onTogglePlay}>
           <Icon name={playing ? "pause" : "play"} size={16} />
         </button>
-        <div className="timecode"><strong>{formatTime(currentTime)}</strong> / {formatTime(TOTAL_DURATION)}</div>
+        <div className="timecode"><strong>{formatTime(currentTime, totalDuration)}</strong> / {formatTime(totalDuration, totalDuration)}</div>
         <button type="button" className="tool-button square" aria-label="静音切换" onClick={() => onToast("预览音量 80%", "已保留人声优先混音") }>
           <Icon name="volume" size={14} />
         </button>
@@ -536,13 +561,13 @@ function PreviewStage({ scenes, activeScene, currentTime, playing, onTogglePlay,
   );
 }
 
-function InspectorPanel({ activeScene, onUpdateScene, productImage, onUpload, onRegenerate }) {
+function InspectorPanel({ activeScene, sceneNumber, productCount, productProfile, onUpdateScene, productImage, onUpload, onRegenerate }) {
   return (
     <aside className="inspector-panel">
       <div className="panel-heading">
         <div>
           <h3>场景属性</h3>
-          <p>SCENE {String(activeScene.id).padStart(2, "0")} · {activeScene.label}</p>
+          <p>SCENE {String(sceneNumber).padStart(2, "0")} · {activeScene.label} · {sceneStatusLabel(activeScene)}</p>
         </div>
         <button type="button" className="icon-button" aria-label="更多场景操作" onClick={onRegenerate}><Icon name="dots" size={16} /></button>
       </div>
@@ -552,25 +577,35 @@ function InspectorPanel({ activeScene, onUpdateScene, productImage, onUpload, on
           <input className="text-field" value={activeScene.headline} onChange={(event) => onUpdateScene("headline", event.target.value)} />
         </section>
         <section className="property-section">
+          <div className="property-title"><span>商品理解</span><span>PRODUCT PROFILE</span></div>
+          <div className="product-facts">
+            <span><small>类目</small><strong>{productFactText(productProfile, "category")}</strong></span>
+            <span><small>材质</small><strong>{productFactText(productProfile, "material")}</strong></span>
+            <span><small>形状</small><strong>{productFactText(productProfile, "shape")}</strong></span>
+            <span><small>颜色</small><strong>{productFactText(productProfile, "colors")}</strong></span>
+          </div>
+        </section>
+        <section className="property-section">
           <div className="property-title"><span>口播脚本</span><span>{activeScene.duration.toFixed(1)} SEC</span></div>
           <textarea className="text-area" value={activeScene.script} onChange={(event) => onUpdateScene("script", event.target.value)}></textarea>
           <div className="script-note" style={{ marginTop: 8 }}>
             <Icon name="spark" size={13} />
-            <span>这句保持“先指出误区，再给出解释”的结构，但已替换原视频表达。</span>
+            <span>{activeScene.adaptationReason || "Provider 未返回该场景的改编依据。"}</span>
           </div>
         </section>
         <section className="property-section">
-          <div className="property-title"><span>配音</span><span>AI VOICE</span></div>
-          <div className="voice-row">
-            <span className="voice-avatar">AN</span>
-            <span className="voice-copy"><strong>安然 · 自然种草</strong><span>语速 1.08× · 情绪轻快</span></span>
-            <span className="wave-mini" aria-hidden="true">
-              {[8, 15, 24, 12, 20, 9, 17].map((height, index) => <i key={index} style={{ "--h": `${height}px` }}></i>)}
-            </span>
+          <div className="property-title"><span>源视频证据</span><span>{activeScene.sourceShotIds.length} SHOTS</span></div>
+          <div className="evidence-list">
+            {activeScene.sourceShots.length > 0 ? activeScene.sourceShots.map((shot) => (
+              <div className="evidence-item" key={shot.shot_id}>
+                <strong>{shot.shot_id} · {Number(shot.start_sec).toFixed(2)}–{Number(shot.end_sec).toFixed(2)}s</strong>
+                <span>{shot.purpose} · {shot.subject} · {shot.action}</span>
+              </div>
+            )) : <span className="empty-evidence">没有源镜头映射</span>}
           </div>
         </section>
         <section className="property-section">
-          <div className="property-title"><span>商品素材</span><span>1 / 8</span></div>
+          <div className="property-title"><span>商品素材</span><span>{productCount} INPUT</span></div>
           <div className="asset-grid">
             <div className="asset-card selected"><ProductArt image={productImage} /></div>
             <button type="button" className="asset-add" aria-label="添加商品素材" onClick={onUpload}><Icon name="plus" size={17} /></button>
@@ -578,19 +613,19 @@ function InspectorPanel({ activeScene, onUpdateScene, productImage, onUpload, on
           </div>
         </section>
         <button type="button" className="secondary-button" onClick={onRegenerate}>
-          <Icon name="redo" size={15} /> 重新生成当前场景
+          <Icon name="redo" size={15} /> {activeScene.storyboard_asset_id ? "重新生成当前场景" : "生成当前场景"}
         </button>
       </div>
     </aside>
   );
 }
 
-function Timeline({ scenes, activeSceneId, currentTime, onSelectScene, onSeek }) {
-  const ruler = [0, 5, 10, 15, 20, 25];
+function Timeline({ scenes, activeSceneId, currentTime, totalDuration, onSelectScene, onSeek }) {
+  const ruler = Array.from({ length: 6 }, (_, index) => (totalDuration * index) / 5);
   const seekFromEvent = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    onSeek(percent * TOTAL_DURATION);
+    onSeek(percent * totalDuration);
   };
   return (
     <section className="timeline-panel" aria-label="视频时间轴">
@@ -601,7 +636,7 @@ function Timeline({ scenes, activeSceneId, currentTime, onSelectScene, onSeek })
       </div>
       <div className="timeline-content" onClick={seekFromEvent}>
         <div className="timeline-ruler">
-          {ruler.map((mark) => <span className="ruler-mark" key={mark}>{String(mark).padStart(2, "0")}:00</span>)}
+          {ruler.map((mark) => <span className="ruler-mark" key={mark}>{formatTime(mark, totalDuration).slice(0, 5)}</span>)}
         </div>
         <div className="timeline-track">
           {scenes.map((scene) => (
@@ -634,21 +669,26 @@ function Timeline({ scenes, activeSceneId, currentTime, onSelectScene, onSeek })
             {AUDIO_BARS.map((height, index) => <i key={index} style={{ "--h": `${Math.min(24, height)}px` }}></i>)}
           </div>
         </div>
-        <div className="playhead" style={{ left: `${(currentTime / TOTAL_DURATION) * 100}%` }}></div>
+        <div className="playhead" style={{ left: `${(currentTime / totalDuration) * 100}%` }}></div>
       </div>
     </section>
   );
 }
 
-function EditorScreen({ scenes, activeScene, currentTime, playing, productImage, previewScale, showSafeArea, onSelectScene, onTogglePlay, onSeek, onUpdateScene, onUpload, onRegenerate, onToast }) {
+function EditorScreen({ scenes, activeScene, analysis, totalDuration, productCount, currentTime, playing, productImage, previewScale, showSafeArea, onSelectScene, onTogglePlay, onSeek, onUpdateScene, onUpload, onRegenerate, onToast }) {
+  if (!activeScene) {
+    return <section className="editor-empty-state"><strong>尚无分镜数据</strong><span>请返回导入页完成分析，工作台不会用演示场景代替真实结果。</span></section>;
+  }
+  const sceneNumber = scenes.findIndex((scene) => scene.id === activeScene.id) + 1;
   return (
     <section className="editor-screen" data-screen-label="视频重制编辑台">
       <div className="editor-main">
-        <StructurePanel scenes={scenes} activeSceneId={activeScene.id} onSelectScene={onSelectScene} />
+        <StructurePanel scenes={scenes} activeSceneId={activeScene.id} onSelectScene={onSelectScene} analysis={analysis} />
         <PreviewStage
           scenes={scenes}
           activeScene={activeScene}
           currentTime={currentTime}
+          totalDuration={totalDuration}
           playing={playing}
           onTogglePlay={onTogglePlay}
           onSeek={onSeek}
@@ -657,9 +697,9 @@ function EditorScreen({ scenes, activeScene, currentTime, playing, productImage,
           showSafeArea={showSafeArea}
           onToast={onToast}
         />
-        <InspectorPanel activeScene={activeScene} onUpdateScene={onUpdateScene} productImage={productImage} onUpload={onUpload} onRegenerate={onRegenerate} />
+        <InspectorPanel activeScene={activeScene} sceneNumber={sceneNumber} productCount={productCount} productProfile={artifactData(analysis, "product_profile")} onUpdateScene={onUpdateScene} productImage={productImage} onUpload={onUpload} onRegenerate={onRegenerate} />
       </div>
-      <Timeline scenes={scenes} activeSceneId={activeScene.id} currentTime={currentTime} onSelectScene={onSelectScene} onSeek={onSeek} />
+      <Timeline scenes={scenes} activeSceneId={activeScene.id} currentTime={currentTime} totalDuration={totalDuration} onSelectScene={onSelectScene} onSeek={onSeek} />
     </section>
   );
 }
@@ -697,11 +737,11 @@ function Toast({ title, message }) {
   );
 }
 
-function AccountMenu({ onClose, onToast }) {
+function AccountMenu({ onClose, onToast, providerInfo }) {
   return (
     <div className="account-menu">
       <div className="account-summary"><strong>本地运营账户</strong><span>Tibao 视频工作台 · Phase B</span></div>
-      <button type="button" onClick={() => { onToast("本地 Alpha", "当前使用 Fake Provider，但项目、素材、Job 和额度都是真实台账"); onClose(); }}><Icon name="folder" size={14} /> 查看空间说明</button>
+      <button type="button" onClick={() => { onToast("Provider 状态", providerInfo?.provider === "openai" ? `真实分析：${providerInfo.analysis_model || "已配置模型"}` : "当前使用 Fixture/Fake，不能代表真实视频分析"); onClose(); }}><Icon name="folder" size={14} /> 查看空间说明</button>
       <button type="button" onClick={() => { openTweaks(); onClose(); }}><Icon name="settings" size={14} /> 原型风格设置</button>
     </div>
   );
@@ -722,6 +762,9 @@ function App() {
   const [formError, setFormError] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [project, setProject] = React.useState(null);
+  const [projectAssets, setProjectAssets] = React.useState([]);
+  const [analysis, setAnalysis] = React.useState(null);
+  const [providerInfo, setProviderInfo] = React.useState({ provider: "unknown" });
   const [analysisJobId, setAnalysisJobId] = React.useState("");
   const [analysisStage, setAnalysisStage] = React.useState("queued");
   const [persistedScenes, setPersistedScenes] = React.useState([]);
@@ -736,18 +779,44 @@ function App() {
   const fileRef = React.useRef(null);
   const videoFileRef = React.useRef(null);
   const toastTimer = React.useRef(null);
+  const [referenceVideoPreview, setReferenceVideoPreview] = React.useState("");
 
   const scenes = React.useMemo(() => {
-    const source = persistedScenes.length > 0 ? persistedScenes : TIMED_SCENES;
-    return source.map((scene) => ({ ...scene, ...(sceneEdits[scene.id] || {}) }));
-  }, [persistedScenes, sceneEdits]);
+    return projectScenes(persistedScenes, analysis)
+      .map((scene) => ({ ...scene, ...(sceneEdits[scene.id] || {}) }));
+  }, [persistedScenes, analysis, sceneEdits]);
+  const totalDuration = React.useMemo(() => projectDuration(scenes, analysis), [scenes, analysis]);
   const activeScene = scenes.find((scene) => currentTime >= scene.start && currentTime < scene.end) || scenes[scenes.length - 1];
+  const productCount = artifactData(analysis, "product_profile")?.image_asset_ids?.length
+    || projectAssets.filter((asset) => asset.role === "product_image").length;
+  const storedSource = projectAssets.find((asset) => asset.role === "source_video" && asset.status === "ready");
+  const sourcePreview = referenceVideoPreview || assetContentUrl(storedSource?.id);
 
   const showToast = React.useCallback((title, message) => {
     window.clearTimeout(toastTimer.current);
     setToast({ title, message });
     toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    videoApi("/health").then((health) => {
+      if (!cancelled) setProviderInfo(health);
+    }).catch(() => {
+      if (!cancelled) setProviderInfo({ provider: "unknown" });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  React.useEffect(() => {
+    if (!referenceVideo) {
+      setReferenceVideoPreview("");
+      return undefined;
+    }
+    const preview = URL.createObjectURL(referenceVideo);
+    setReferenceVideoPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [referenceVideo]);
 
   React.useEffect(() => {
     if (linkedProduct) return undefined;
@@ -760,7 +829,15 @@ function App() {
     ]).then(([aggregate, sceneResponse]) => {
       if (cancelled) return;
       setProject(aggregate.project);
-      const restoredScenes = projectScenes(sceneResponse.scenes || []);
+      setProjectAssets(aggregate.assets || []);
+      setAnalysis(aggregate.analysis || null);
+      const productAsset = (aggregate.assets || []).find((asset) => asset.role === "product_image" && asset.status === "ready");
+      if (productAsset) {
+        setProductImage(assetContentUrl(productAsset.id));
+        setProductFileName("已上传商品素材");
+        setHasProduct(true);
+      }
+      const restoredScenes = sceneResponse.scenes || [];
       if (restoredScenes.length > 0) {
         setPersistedScenes(restoredScenes);
         setGenerated(restoredScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
@@ -784,11 +861,15 @@ function App() {
   }, [currentTime]);
 
   React.useEffect(() => {
+    if (currentTime >= totalDuration) setCurrentTime(Math.max(0, totalDuration - 0.01));
+  }, [currentTime, totalDuration]);
+
+  React.useEffect(() => {
     if (!playing) return undefined;
     const timer = window.setInterval(() => {
       setCurrentTime((time) => {
         const next = time + 0.08;
-        if (next >= TOTAL_DURATION) {
+        if (next >= totalDuration) {
           setPlaying(false);
           return 0;
         }
@@ -796,7 +877,7 @@ function App() {
       });
     }, 80);
     return () => window.clearInterval(timer);
-  }, [playing]);
+  }, [playing, totalDuration]);
 
   React.useEffect(() => {
     if (screen !== "analyzing" || !analysisJobId) return undefined;
@@ -815,7 +896,9 @@ function App() {
           ]);
           if (cancelled) return;
           setProject(aggregate.project);
-          const analyzedScenes = projectScenes(sceneResponse.scenes || []);
+          setProjectAssets(aggregate.assets || []);
+          setAnalysis(aggregate.analysis || null);
+          const analyzedScenes = sceneResponse.scenes || [];
           setPersistedScenes(analyzedScenes);
           setGenerated(analyzedScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
           setCurrentTime(0);
@@ -828,7 +911,7 @@ function App() {
           setFormError(job.error_message || `分析作业进入 ${job.status} 状态，请重试。`);
           return;
         }
-        timer = window.setTimeout(poll, 450);
+        timer = window.setTimeout(poll, 1_500);
       } catch (error) {
         if (!cancelled) {
           setScreen("setup");
@@ -845,7 +928,7 @@ function App() {
 
   React.useEffect(() => () => {
     window.clearTimeout(toastTimer.current);
-    if (productImage) URL.revokeObjectURL(productImage);
+    if (productImage.startsWith("blob:")) URL.revokeObjectURL(productImage);
   }, [productImage]);
 
   const uploadAsset = async (projectId, role, file) => {
@@ -917,6 +1000,8 @@ function App() {
       await uploadAsset(created.project.id, "product_image", productFile);
       const refreshed = await videoApi(`/projects/${created.project.id}`);
       setProject(refreshed.project);
+      setProjectAssets(refreshed.assets || []);
+      setAnalysis(refreshed.analysis || null);
       const run = await videoApi(`/projects/${created.project.id}/analysis-runs`, {
         method: "POST",
         headers: writeHeaders(),
@@ -940,12 +1025,12 @@ function App() {
 
   const handleDemo = () => {
     const demoVideo = fileFromBase64(DEMO_VIDEO_BASE64, "recut-phase-b-demo.mp4", "video/mp4");
-    const demoImage = fileFromBase64(DEMO_IMAGE_BASE64, "glowdrop-main.png", "image/png");
+    const demoImage = fileFromBase64(DEMO_IMAGE_BASE64, "recut-fixture-product.png", "image/png");
     setUrl("");
     setReferenceVideo(demoVideo);
     setProductFile(demoImage);
-    setProductImage("");
-    setProductFileName("glowdrop-main.png");
+    setProductImage(URL.createObjectURL(demoImage));
+    setProductFileName("recut-fixture-product.png");
     setHasProduct(true);
     setFormError("");
     showToast("Phase B fixture 已载入", "这是可被 FFprobe/FFmpeg 真实解码的 3 秒无音轨 MP4；ASR 会明确跳过");
@@ -979,7 +1064,7 @@ function App() {
       showToast("文件格式不支持", "请选择 PNG、JPG 或 WebP 图片");
       return;
     }
-    if (productImage) URL.revokeObjectURL(productImage);
+    if (productImage.startsWith("blob:")) URL.revokeObjectURL(productImage);
     setProductFile(file);
     setProductImage(URL.createObjectURL(file));
     setProductFileName(file.name);
@@ -995,7 +1080,7 @@ function App() {
       setPlaying(false);
       setScreen("setup");
     } else if (target === "editor") {
-      if (screen === "editor") showToast("已经在生成工作台", "当前项目共有 6 个场景");
+      if (screen === "editor") showToast("已经在生成工作台", `当前项目共有 ${scenes.length} 个真实场景`);
       else showToast("先完成结构分析", "导入参考视频和商品后即可进入工作台");
     } else if (target === "assets") {
       showToast("素材库原型", "下一版可扩展为独立的品牌资产中心");
@@ -1006,10 +1091,11 @@ function App() {
 
   const selectScene = (scene) => {
     setPlaying(false);
-    setCurrentTime(Math.min(TOTAL_DURATION - 0.01, scene.start + 0.03));
+    setCurrentTime(Math.min(totalDuration - 0.01, scene.start + 0.03));
   };
 
   const updateScene = (field, value) => {
+    if (!activeScene) return;
     setSceneEdits((edits) => ({ ...edits, [activeScene.id]: { ...(edits[activeScene.id] || {}), [field]: value } }));
   };
 
@@ -1035,8 +1121,10 @@ function App() {
       videoApi(`/projects/${project.id}`),
       videoApi(`/projects/${project.id}/scenes`)
     ]);
-    const nextScenes = projectScenes(sceneResponse.scenes || []);
+    const nextScenes = sceneResponse.scenes || [];
     setProject(aggregate.project);
+    setProjectAssets(aggregate.assets || []);
+    setAnalysis(aggregate.analysis || null);
     setPersistedScenes(nextScenes);
     setGenerated(nextScenes.length > 0 && nextScenes.every((scene) => Boolean(scene.storyboard_asset_id)));
     return nextScenes;
@@ -1158,7 +1246,7 @@ function App() {
             productFileName={productFileName}
             hasProduct={hasProduct}
             onUpload={() => fileRef.current?.click()}
-            onRemoveProduct={() => { if (productImage) URL.revokeObjectURL(productImage); setProductFile(null); setProductImage(""); setProductFileName(""); setHasProduct(false); }}
+            onRemoveProduct={() => { if (productImage.startsWith("blob:")) URL.revokeObjectURL(productImage); setProductFile(null); setProductImage(""); setProductFileName(""); setHasProduct(false); }}
             onDemo={handleDemo}
             onAnalyze={handleAnalyze}
             submitting={submitting}
@@ -1167,13 +1255,17 @@ function App() {
             setLanguage={setLanguage}
             length={length}
             setLength={setLength}
+            providerInfo={providerInfo}
           />
         )}
-        {screen === "analyzing" && <AnalysisScreen stage={analysisStage} />}
+        {screen === "analyzing" && <AnalysisScreen stage={analysisStage} sourcePreview={sourcePreview} providerName={providerInfo.provider} />}
         {screen === "editor" && (
           <EditorScreen
             scenes={scenes}
             activeScene={activeScene}
+            analysis={analysis}
+            totalDuration={totalDuration}
+            productCount={productCount}
             currentTime={currentTime}
             playing={playing}
             productImage={productImage}
@@ -1181,7 +1273,7 @@ function App() {
             showSafeArea={tweaks.showSafeArea}
             onSelectScene={selectScene}
             onTogglePlay={() => setPlaying((value) => !value)}
-            onSeek={(time) => setCurrentTime(Math.max(0, Math.min(TOTAL_DURATION - 0.01, time)))}
+            onSeek={(time) => setCurrentTime(Math.max(0, Math.min(totalDuration - 0.01, time)))}
             onUpdateScene={updateScene}
             onUpload={() => fileRef.current?.click()}
             onRegenerate={handleRegenerateScene}
@@ -1189,7 +1281,7 @@ function App() {
           />
         )}
       </div>
-      {accountOpen && <AccountMenu onClose={() => setAccountOpen(false)} onToast={showToast} />}
+      {accountOpen && <AccountMenu onClose={() => setAccountOpen(false)} onToast={showToast} providerInfo={providerInfo} />}
       {rendering && <GenerateModal progress={renderProgress} />}
       {toast && <Toast title={toast.title} message={toast.message} />}
       <TweaksPanel title="风格">

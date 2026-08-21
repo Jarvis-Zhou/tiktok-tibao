@@ -65,7 +65,7 @@ export function assertPrototypeAnalysisResult(value: unknown): asserts value is 
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new VideoDomainError({
       code: "BLUEPRINT_SCHEMA_INVALID",
-      message: "Fake Provider returned a non-object result",
+      message: "Analysis Provider returned a non-object result",
     });
   }
   const result = value as Partial<PrototypeAnalysisResult>;

@@ -29,6 +29,52 @@ npm run dev
 
 然后打开 <http://127.0.0.1:3210>。
 
+### Docker 容器
+
+镜像基于 Node.js 22 Debian，内置 FFmpeg / FFprobe，以非 root 用户运行。SQLite、上传素材、生成的 Storyboard 和 Prompt ZIP 都保存在名为 `tibao-data` 的 Docker volume 中。
+
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+打开 <http://127.0.0.1:3210> 或直接进入 <http://127.0.0.1:3210/video-studio/>。查看日志与健康状态：
+
+```bash
+docker compose logs -f server
+curl http://127.0.0.1:3210/api/video/v1/health
+```
+
+`compose.yaml` 让服务在容器内监听 `0.0.0.0`，宿主机默认只发布到 `127.0.0.1`。需要让局域网内其他机器访问时，在 `.env` 设置 `TIBAO_BIND_ADDRESS=0.0.0.0`；视频工作台尚未提供公网登录鉴权，请用宿主机防火墙仅放行可信网段，不要把 3210 端口直接暴露到公网。宿主机端口冲突时可在 `.env` 修改 `TIBAO_PORT`。
+
+升级镜像不会删除数据：
+
+```bash
+docker compose down
+docker compose build --pull
+docker compose up -d
+```
+
+只有明确要永久删除数据库和全部视频素材时才执行 `docker compose down -v`。
+
+也可以只构建镜像：
+
+```bash
+docker build -t tiktok-tibao:phase-b .
+```
+
+在中国大陆访问 Debian 官方源较慢时，可临时指定镜像源，不需要修改 Dockerfile：
+
+```bash
+docker compose build \
+  --build-arg DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian \
+  --build-arg DEBIAN_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+```
+
+仓库仍不提交 `package-lock.json`；Docker 构建会在隔离的构建层内执行 `npm install`。
+
 只使用 Chrome 插件时至少配置：
 
 ```dotenv
@@ -157,11 +203,87 @@ http://127.0.0.1:3210/video-studio/
 
 工作台支持粘贴参考视频链接，或选择不超过 150 MB 的本地 MP4，并上传 PNG、JPG 或 WebP 商品图片。Alpha 的稳定路径是本地上传：URL 只做合法性与预览降级，服务不会绕过平台规则下载 TikTok 媒体。
 
-Phase A 后端骨架已经接入工作台：项目、素材校验和、私有本地存储、Job/Step、租约、事件、幂等、ETag、额度预占与 3–6 镜 Storyboard 都使用真实 SQLite 状态。Phase B 当前已接入真实 FFprobe/FFmpeg 探测、抽帧和无音轨降级，正式版本化 Schema、最多两次结构修复、逐镜图片 Job/QC/锁定/局部重做，以及 draft/final Prompt ZIP（含 Manifest 文件哈希）。AI Provider 仍是 deterministic fake adapter，便于独立验证控制面；它不会调用外部模型，也不会生成 MP4。
+Phase A 后端骨架已经接入工作台：项目、素材校验和、私有本地存储、Job/Step、租约、事件、幂等、ETag、额度预占与 3–6 镜 Storyboard 都使用真实 SQLite 状态。Phase B 当前已接入真实 FFprobe/FFmpeg 探测、抽帧和无音轨降级，正式版本化 Schema、最多两次结构修复、逐镜图片 Job/QC/锁定/局部重做，以及 draft/final Prompt ZIP（含 Manifest 文件哈希）。工作台只展示项目 API 返回的 Source Blueprint、Product Profile、Adapted Blueprint、真实时长、镜头数、证据时间点和逐镜生成/QC 状态；不会再用固定 25 秒演示场景填充空结果。
+
+默认 `VIDEO_AI_PROVIDER=fake`，用于不花费模型额度地验证控制面。Fake 会在页面明确标识，它的 HOOK/PAIN/REVEAL/DEMO/PROOF/CTA 和色块 Storyboard 不是对上传素材的真实理解。要启用多模态分析与商品参考图 Storyboard，在根目录 `.env` 中配置：
+
+```dotenv
+VIDEO_AI_PROVIDER=openai
+VIDEO_AI_STORYBOARD_PROVIDER=openai
+VIDEO_AI_BASE_URL=https://api.openai.com/v1
+VIDEO_AI_API_KEY=你的服务端API密钥
+VIDEO_AI_ANALYSIS_API=responses
+VIDEO_AI_ANALYSIS_MODEL=gpt-5.6-sol
+VIDEO_AI_REASONING_EFFORT=medium
+VIDEO_AI_IMAGE_MODEL=gpt-image-2
+# disabled | local | openai
+VIDEO_ASR_PROVIDER=disabled
+# VIDEO_ASR_PROVIDER=openai 时必填
+VIDEO_AI_TRANSCRIPTION_MODEL=支持音频转录的模型ID
+VIDEO_AI_REQUEST_TIMEOUT_MS=300000
+VIDEO_AI_MAX_FRAMES=6
+```
+
+分析端默认调用 `POST /responses`；旧兼容网关可设置 `VIDEO_AI_ANALYSIS_API=chat-completions`，继续调用 `POST /chat/completions`。真实 Storyboard 需要 `POST /images/edits`；云端转录还需 `POST /audio/transcriptions`。分析请求会发送 FFmpeg 生成的联系表、按时间均匀抽样的证据帧、商品图片和可用的转录文本；结构化结果仍由服务端 Schema 严格校验后才会入库。Storyboard 自动 QC 不伪造分数，首版统一进入 `needs_review` 等待人工检查。API 密钥只保留在服务端环境变量或只读密钥文件中，不返回浏览器，也不要提交到 Git。
+
+当前机器的 `~/.claude/settings.json` 可作为本地模型网关的只读凭据源，无需复制 Token 到仓库。该网关已验证支持 `gpt-5.6-sol` 的 Responses 图片输入；它未声明 Images API，因此下面的启动方式只启用真实图片理解和提示词生成，Storyboard 暂用本地占位图：
+
+```bash
+CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json" \
+  docker compose -f compose.yaml -f compose.model-gateway.yaml up -d --build server
+```
+
+启动后访问 `/api/video/v1/health`，应看到 `provider=openai`、`analysis_api=responses`、`analysis_model=gpt-5.6-sol`、`storyboard_provider=fake`。如网关地址不同，可额外设置 `VIDEO_AI_BASE_URL`。这里的 `gpt-5.6-sol` 是与当前 Codex 同代的 API 模型路径，不代表把 Codex 会话本身嵌入工作台。
+
+### 本地 faster-whisper 转录
+
+内置的 `local-asr` 服务默认使用 `small + CPU + int8 + 单并发`，不会将参考视频音频发往云端。它只负责转录；视觉分析和 Storyboard 仍需 `VIDEO_AI_PROVIDER=openai` 及对应的多模态/图片模型。转录时不传目标市场语言，faster-whisper 会自动识别原声语言，再把原文和检测语言交给分析模型做本地化改编。
+
+在 `.env` 中增加：
+
+```dotenv
+VIDEO_ASR_PROVIDER=local
+VIDEO_LOCAL_ASR_MODEL=small
+VIDEO_LOCAL_ASR_BASE_URL=http://127.0.0.1:8001/v1
+# 可选；若填写，local-asr 与 Tibao 必须使用同一个值
+VIDEO_LOCAL_ASR_API_KEY=
+VIDEO_ASR_REQUEST_TIMEOUT_MS=600000
+```
+
+本地运行 Node 服务时，只启动 ASR 容器：
+
+```bash
+docker compose --profile local-asr up -d --build local-asr
+npm run dev
+```
+
+整套使用 Compose 时：
+
+```bash
+docker compose --profile local-asr up -d --build
+```
+
+Compose 会自动把服务器内的 ASR 地址改为 `http://local-asr:8000/v1`，宿主机调试地址仍是 `http://127.0.0.1:8001`。首次启动会下载 `small` 模型到 `tibao-asr-models` volume，之后复用缓存；查看状态和日志：
+
+```bash
+curl http://127.0.0.1:8001/health
+docker compose logs -f local-asr
+```
+
+建议至少 4 核 CPU、8 GB 内存并预留 2 GB 磁盘空间。在中国大陆下载镜像或模型较慢时，可以只对当次命令指定镜像源：
+
+```bash
+TIBAO_PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.11-slim-bookworm \
+TIBAO_PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+TIBAO_HF_ENDPOINT=https://hf-mirror.com \
+docker compose --profile local-asr up -d --build
+```
+
+转录失败会软降级：视觉分析继续，Source Blueprint 标记 `transcript_status=failed`。旧配置中如果没有 `VIDEO_ASR_PROVIDER`、但存在 `VIDEO_AI_TRANSCRIPTION_MODEL`，仍按云端 ASR 处理。
 
 视频接口统一位于 `/api/video/v1`。素材写入 `VIDEO_STORAGE_ROOT`，临时上传写入 `VIDEO_TEMP_ROOT`，两个目录都在静态站点目录之外；SQLite 模式只允许 `VIDEO_WORKER_MODE=embedded`。开发重启时 runtime 会先停止领取作业、取消可中止工作并释放未提交 Provider 的租约与额度，再关闭数据库。
 
-功能基线见 [`docs/video-prd.md`](docs/video-prd.md)，后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。V1 的正式产物是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出；ASR/VLM/LLM 的真实供应商凭据和适配器仍待配置，相关接口与失败边界已经预留。
+功能基线见 [`docs/video-prd.md`](docs/video-prd.md)，后端的 V1 范围、API、数据模型、异步作业、资产安全和分阶段实施方案见 [`docs/video-backend-design.md`](docs/video-backend-design.md)。`viral-video-remix-hifi` 当前仓库本身是高保真前端原型与 PRD，没有后端或模型调用；这里复用了它的交互与 Blueprint 语义，真实模型边界由上述可配置 Provider 承担。V1 的正式产物仍是 3–6 镜 Storyboard 与 Prompt 包，不包含视频模型调用或 MP4 导出。
 
 ## 验证命令
 

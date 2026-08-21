@@ -181,6 +181,12 @@ test("Phase A API persists uploads and completes a fake-provider storyboard job"
     const finished = await app.inject({ method: "GET", url: `/api/video/v1/projects/${projectId}` });
     assert.equal(finished.json().project.status, "adaptation_ready");
     assert.equal(finished.json().jobs[0].status, "succeeded");
+    assert.equal(finished.json().analysis.provider_run.provider, "fake");
+    assert.equal(finished.json().analysis.provider_run.model, "deterministic-prototype-v2");
+    assert.equal(finished.json().analysis.source_blueprint.data.duration_sec, 15);
+    assert.equal(finished.json().analysis.source_blueprint.data.shots.length, 6);
+    assert.equal(finished.json().analysis.product_profile.data.image_asset_ids.length, 1);
+    assert.equal(finished.json().analysis.adapted_blueprint.data.scenes.length, 6);
 
     const updated = await app.inject({
       method: "PATCH",
@@ -467,6 +473,144 @@ test("worker drain releases an unsubmitted job reservation and permits immediate
       .prepare("SELECT reserved_units FROM video_usage_budgets WHERE project_id = ?")
       .get(project.id) as { reserved_units: number };
     assert.equal(reheldBudget.reserved_units, 1);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("provider timeout reconciliation is reclaimed and stops at the job attempt limit", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tibao-video-reconciliation-"));
+  const database = new TibaoDatabase(join(directory, "queue.sqlite"));
+  const repository = new SqliteVideoRepository(database, 10);
+  try {
+    const project = repository.createProject({
+      ownerId: "local",
+      name: "Provider timeout test",
+      catalogContext: null,
+      targetMarket: "MY",
+      language: "ms-MY",
+      targetDurationSec: null,
+      similarityScore: 60,
+      idempotency: { key: "project", scope: "POST /projects", requestHash: "project-hash" },
+    }).project;
+    for (const [role, mime, hash] of [
+      ["source_video", "video/mp4", "c".repeat(64)],
+      ["product_image", "image/png", "d".repeat(64)],
+    ] as const) {
+      const created = repository.createUpload({
+        ownerId: "local",
+        projectId: project.id,
+        role,
+        mimeType: mime,
+        expectedBytes: 12,
+        expectedSha256: hash,
+        maxBytes: 100,
+        idempotency: { key: role, scope: "upload", requestHash: role },
+      });
+      repository.beginUpload("local", created.upload.id, mime, 12);
+      repository.finishUploadContent("local", created.upload.id, {
+        bytes: 12,
+        sha256: hash,
+        tempKey: created.upload.tempKey,
+      });
+      repository.completeUpload("local", created.upload.id, {
+        detectedMime: mime,
+        storageKey: `fixture/${hash}`,
+        width: role === "source_video" ? 1080 : 800,
+        height: role === "source_video" ? 1920 : 800,
+        durationMs: role === "source_video" ? 15_000 : null,
+        metadata: role === "source_video" ? { has_audio: false } : {},
+      });
+    }
+    const queued = repository.enqueuePrototypeAnalysis({
+      ownerId: "local",
+      projectId: project.id,
+      expectedProjectRevision: 1,
+      policyVersion: "test",
+      requestId: "request",
+      idempotency: { key: "analysis", scope: "analysis", requestHash: "analysis" },
+    }).job;
+    const timeout = {
+      code: "PROVIDER_TIMEOUT",
+      message: "The AI provider request timed out",
+      retryable: true,
+      providerOutcomeUnknown: true,
+    } as const;
+
+    const first = repository.claim("worker-1", 180_000, { media: 0, text: 1, image: 0 })[0]!;
+    assert.equal(first.id, queued.id);
+    assert.equal(first.attempt, 1);
+    assert.equal(repository.markProviderSubmitted(first.id, "worker-1", "provider-request-1"), true);
+    assert.equal(repository.fail(first, "worker-1", timeout), true);
+    assert.equal(repository.getJob("local", queued.id)?.status, "retry_wait");
+    assert.equal(repository.getJob("local", queued.id)?.progress_stage, "reconciling");
+    assert.equal(
+      (database.raw.prepare("SELECT status FROM video_usage_reservations WHERE job_id = ?").get(queued.id) as { status: string }).status,
+      "reconciling",
+    );
+    const waitingStep = database.raw
+      .prepare("SELECT status, attempt FROM video_job_steps WHERE job_id = ? LIMIT 1")
+      .get(queued.id) as { status: string; attempt: number };
+    assert.equal(waitingStep.status, "queued");
+    assert.equal(waitingStep.attempt, 1);
+
+    // Heal jobs written by versions that left their step rows in `running`
+    // after moving the parent job to retry_wait.
+    database.raw.prepare("UPDATE video_job_steps SET status = 'running' WHERE job_id = ?").run(queued.id);
+
+    database.raw.prepare("UPDATE video_jobs SET next_run_at = ? WHERE id = ?")
+      .run("1970-01-01T00:00:00.000Z", queued.id);
+    const second = repository.claim("worker-2", 180_000, { media: 0, text: 1, image: 0 })[0]!;
+    assert.equal(second.id, queued.id);
+    assert.equal(second.attempt, 2);
+    assert.equal(second.error_code, null);
+    assert.equal(second.error_message, null);
+    assert.equal(second.error_retryable, null);
+    const secondState = database.raw
+      .prepare(`
+        SELECT j.provider_request_id, s.status AS step_status, s.attempt AS step_attempt,
+          s.error_code AS step_error_code, r.status AS reservation_status
+        FROM video_jobs j
+        JOIN video_job_steps s ON s.job_id = j.id
+        JOIN video_usage_reservations r ON r.job_id = j.id
+        WHERE j.id = ?
+      `)
+      .get(queued.id) as {
+        provider_request_id: string | null;
+        step_status: string;
+        step_attempt: number;
+        step_error_code: string | null;
+        reservation_status: string;
+      };
+    assert.equal(secondState.provider_request_id, null);
+    assert.equal(secondState.step_status, "running");
+    assert.equal(secondState.step_attempt, 2);
+    assert.equal(secondState.step_error_code, null);
+    assert.equal(secondState.reservation_status, "held");
+    assert.equal(repository.markProviderSubmitted(second.id, "worker-2", "provider-request-2"), true);
+    assert.equal(repository.fail(second, "worker-2", timeout), true);
+
+    database.raw.prepare("UPDATE video_jobs SET next_run_at = ? WHERE id = ?")
+      .run("1970-01-01T00:00:00.000Z", queued.id);
+    const third = repository.claim("worker-3", 180_000, { media: 0, text: 1, image: 0 })[0]!;
+    assert.equal(third.attempt, 3);
+    assert.equal(repository.markProviderSubmitted(third.id, "worker-3", "provider-request-3"), true);
+    assert.equal(repository.fail(third, "worker-3", timeout), true);
+
+    const terminal = repository.getJob("local", queued.id)!;
+    assert.equal(terminal.status, "failed");
+    assert.equal(terminal.attempt, 3);
+    assert.equal(terminal.error_code, "PROVIDER_TIMEOUT");
+    assert.equal(
+      (database.raw.prepare("SELECT status FROM video_usage_reservations WHERE job_id = ?").get(queued.id) as { status: string }).status,
+      "released",
+    );
+    assert.equal(
+      (database.raw.prepare("SELECT reserved_units FROM video_usage_budgets WHERE project_id = ?").get(project.id) as { reserved_units: number }).reserved_units,
+      0,
+    );
+    assert.equal(repository.claim("worker-4", 180_000, { media: 0, text: 1, image: 0 }).length, 0);
   } finally {
     database.close();
     rmSync(directory, { recursive: true, force: true });

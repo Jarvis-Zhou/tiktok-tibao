@@ -72,6 +72,10 @@ export interface PrototypeAnalysisInput {
   sourceWidth?: number;
   sourceHeight?: number;
   audioAvailable?: boolean;
+  sourceFramePaths?: string[];
+  sourceContactSheetPath?: string | null;
+  sourceAudioPath?: string | null;
+  productImagePaths?: string[];
   catalogTitle?: string;
   catalogCategory?: string;
   catalogBrand?: string;
@@ -80,7 +84,7 @@ export interface PrototypeAnalysisInput {
 export interface PrototypeAnalysisProvider {
   readonly id: string;
   readonly model: string;
-  analyze(input: PrototypeAnalysisInput, signal: AbortSignal): Promise<PrototypeAnalysisResult>;
+  analyze(input: PrototypeAnalysisInput, signal: AbortSignal): Promise<ProviderResult<PrototypeAnalysisResult>>;
 }
 
 export interface ProviderRunMetadata {
@@ -97,6 +101,7 @@ export interface StoryboardImageInput {
   generation: number;
   imagePrompt: string;
   negativePrompt: string;
+  productImagePaths?: string[];
   width?: number;
   height?: number;
 }

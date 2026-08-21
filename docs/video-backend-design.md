@@ -705,6 +705,10 @@ interface StoryboardImageProvider {
 
 统一的 `ProviderResult` 返回 provider、model、provider request ID、usage、estimated cost、latency 和安全结果。适配器把错误归一化为 `transient | rate_limited | invalid_output | policy | permanent`。
 
+Alpha 当前提供两个显式模式。`fake` 只用于 fixture/控制面验证，页面必须显示 Fake 标识，不能把它生成的结构和置信度解释为对上传素材的真实分析；`openai` 是可配置的 OpenAI-compatible 适配器。后者把 FFmpeg 联系表、均匀抽样帧、商品图片像素以及可选转录文本发送到多模态分析模型，并通过图片编辑端点生成保留商品外观的 Storyboard。兼容端点至少实现 `POST /chat/completions` 与 `POST /images/edits`。ASR 可独立选择 `disabled | openai | local`：`openai` 复用云端的 `POST /audio/transcriptions`，`local` 调用内置的 OpenAI-compatible faster-whisper sidecar。默认本地基线是 `small + CPU + int8 + 单并发`；不把项目目标语言传给 ASR，而是自动检测参考音频的源语言，并把原文、检测语言和视觉证据一起交给分析模型。所有模型 ID 必须显式配置，部署不能依赖供应商会变化的默认模型。
+
+当前 Alpha 为减少多次模型调用之间的漂移，允许内部 `PrototypeAnalysisProvider` 在一次受约束的 JSON 响应中生成 Source Blueprint、Product Profile、Adapted Blueprint 和 UI scene projection；持久化边界仍分别执行三类版本化 Schema 校验与引用提取。后续拆成上面的细粒度 Provider 时，不改变 Job、Artifact 或前端 API 契约。
+
 付费 Provider 调用使用持久化的 `video_provider_runs` 日志：网络请求前先写 `prepared` 与内部幂等键，供应商接受后尽快写 `submitted` 和 request ID，返回后写 `succeeded | failed` 与 usage。在“请求可能已被接受，但本地没拿到 request ID”的网络模糊区间一律记为 `outcome_unknown`，进入对账而不是释放额度并盲目重试。
 
 V1.1 的 `VideoGenerationProvider` 与 V1.2 的 `TtsProvider` / `Composer` 可以预留 TypeScript contract，但不注册实现、不创建 UI 能力，也不接受 V1 API 作业类型。
@@ -876,10 +880,19 @@ VIDEO_ALLOWED_MARKETS=MY
 VIDEO_ALLOWED_LANGUAGES=ms-MY,en-MY
 VIDEO_ASSET_RETENTION_DAYS=30
 VIDEO_DATA_ENCRYPTION_KEY=another-server-side-secret
-VIDEO_ASR_PROVIDER=provider-id
-VIDEO_VISION_PROVIDER=provider-id
-VIDEO_TEXT_PROVIDER=provider-id
-VIDEO_STORYBOARD_PROVIDER=provider-id
+VIDEO_AI_PROVIDER=fake # fake | openai
+VIDEO_AI_BASE_URL=https://api.openai.com/v1
+VIDEO_AI_API_KEY=
+VIDEO_AI_ANALYSIS_MODEL=
+VIDEO_AI_IMAGE_MODEL=
+VIDEO_ASR_PROVIDER=disabled # disabled | openai | local
+VIDEO_AI_TRANSCRIPTION_MODEL= # VIDEO_ASR_PROVIDER=openai 时必填
+VIDEO_LOCAL_ASR_BASE_URL=http://127.0.0.1:8001/v1
+VIDEO_LOCAL_ASR_API_KEY=
+VIDEO_LOCAL_ASR_MODEL=small
+VIDEO_ASR_REQUEST_TIMEOUT_MS=600000
+VIDEO_AI_REQUEST_TIMEOUT_MS=120000
+VIDEO_AI_MAX_FRAMES=12
 ```
 
 具体 Provider key 使用各自环境变量或 Secret Manager。`VIDEO_DATA_ENCRYPTION_KEY` 用于完整来源 URL 等视频域敏感元数据，必须与 TikTok Token 加密密钥分开。启动时校验 lease ≥ 3 × heartbeat、目录不位于 public 下、大小限制和允许的市场/语言组合；SQLite 配置非 embedded worker 时直接启动失败。

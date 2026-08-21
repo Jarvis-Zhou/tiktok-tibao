@@ -6,11 +6,14 @@ import {
   extractSchemaAssetReferences,
   sha256Fingerprint,
   type ArtifactSchemaVersion,
+  type AdaptedBlueprint,
   type CatalogContext,
   type ExportKind,
+  type ProductProfile,
   type PromptPackageManifest,
   type PrototypeAnalysisResult,
   type PrototypeScene,
+  type SourceVideoAnalysis,
   type StoryboardQcStatus,
   type VideoAsset,
   type VideoAssetRole,
@@ -82,6 +85,39 @@ export interface ProjectAggregate {
   assets: VideoAsset[];
   jobs: VideoJob[];
   scenes: PrototypeScene[];
+  analysis: ProjectAnalysisArtifacts;
+}
+
+export interface ActiveProjectArtifact<T> {
+  id: string;
+  version: number;
+  revision: number;
+  schema_version: string;
+  status: string;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  data: T;
+}
+
+export interface ProjectProviderRun {
+  provider: string;
+  model: string;
+  provider_request_id: string | null;
+  status: string;
+  usage: Record<string, number>;
+  estimated_cost_micros: number | null;
+  latency_ms: number | null;
+  safety: Record<string, unknown>;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface ProjectAnalysisArtifacts {
+  source_blueprint: ActiveProjectArtifact<SourceVideoAnalysis> | null;
+  product_profile: ActiveProjectArtifact<ProductProfile> | null;
+  adapted_blueprint: ActiveProjectArtifact<AdaptedBlueprint> | null;
+  provider_run: ProjectProviderRun | null;
 }
 
 export interface VideoProjectEvent {
@@ -100,6 +136,18 @@ export interface GeneratedAssetDescriptor {
   width: number | null;
   height: number | null;
   metadata: Record<string, unknown>;
+}
+
+export interface PrototypeAnalysisWorkerResult {
+  kind: "prototype_analysis";
+  result: PrototypeAnalysisResult;
+  provider: string;
+  model: string;
+  providerRequestId: string | null;
+  usage: Record<string, number>;
+  estimatedCostMicros: number;
+  latencyMs: number;
+  safety: Record<string, unknown>;
 }
 
 export interface SceneGenerationWorkerResult {
@@ -404,6 +452,81 @@ export class SqliteVideoRepository implements WorkerRepository {
       assets: this.listProjectAssets(ownerId, projectId),
       jobs: this.listProjectJobs(ownerId, projectId, 20),
       scenes: this.listScenes(ownerId, projectId),
+      analysis: this.getProjectAnalysis(ownerId, projectId),
+    };
+  }
+
+  getProjectAnalysis(ownerId: string, projectId: string): ProjectAnalysisArtifacts {
+    const project = this.raw
+      .prepare(`
+        SELECT active_source_blueprint_id, active_product_profile_id, active_adapted_blueprint_id
+        FROM video_projects
+        WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
+      `)
+      .get(projectId, ownerId) as SqlRow | undefined;
+    if (!project) {
+      return {
+        source_blueprint: null,
+        product_profile: null,
+        adapted_blueprint: null,
+        provider_run: null,
+      };
+    }
+
+    const source = project.active_source_blueprint_id
+      ? this.raw.prepare("SELECT * FROM video_blueprints WHERE id = ? AND project_id = ? AND kind = 'source'")
+          .get(String(project.active_source_blueprint_id), projectId) as SqlRow | undefined
+      : undefined;
+    const product = project.active_product_profile_id
+      ? this.raw.prepare("SELECT * FROM video_product_profiles WHERE id = ? AND project_id = ?")
+          .get(String(project.active_product_profile_id), projectId) as SqlRow | undefined
+      : undefined;
+    const adapted = project.active_adapted_blueprint_id
+      ? this.raw.prepare("SELECT * FROM video_blueprints WHERE id = ? AND project_id = ? AND kind = 'adapted'")
+          .get(String(project.active_adapted_blueprint_id), projectId) as SqlRow | undefined
+      : undefined;
+    const provider = this.raw
+      .prepare(`
+        SELECT r.* FROM video_provider_runs r
+        JOIN video_jobs j ON j.id = r.job_id
+        WHERE j.project_id = ? AND r.capability = 'prototype_analysis'
+        ORDER BY r.created_at DESC, r.id DESC
+        LIMIT 1
+      `)
+      .get(projectId) as SqlRow | undefined;
+
+    const artifact = <T>(row: SqlRow | undefined): ActiveProjectArtifact<T> | null => row ? {
+      id: String(row.id),
+      version: Number(row.version),
+      revision: Number(row.revision),
+      schema_version: String(row.schema_version),
+      status: String(row.status),
+      confirmed_at: nullableString(row.confirmed_at),
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+      data: parseJson<T>(row.data_json, {} as T),
+    } : null;
+
+    return {
+      source_blueprint: artifact<SourceVideoAnalysis>(source),
+      product_profile: artifact<ProductProfile>(product),
+      adapted_blueprint: artifact<AdaptedBlueprint>(adapted),
+      provider_run: provider ? {
+        provider: String(provider.provider),
+        model: String(provider.model),
+        provider_request_id: nullableString(provider.provider_request_id),
+        status: String(provider.status),
+        usage: parseJson<Record<string, number>>(provider.usage_json, {}),
+        estimated_cost_micros: provider.estimated_cost_micros === null || provider.estimated_cost_micros === undefined
+          ? null
+          : Number(provider.estimated_cost_micros),
+        latency_ms: provider.latency_ms === null || provider.latency_ms === undefined
+          ? null
+          : Number(provider.latency_ms),
+        safety: parseJson<Record<string, unknown>>(provider.safety_json, {}),
+        created_at: String(provider.created_at),
+        finished_at: nullableString(provider.finished_at),
+      } : null,
     };
   }
 
@@ -859,6 +982,7 @@ export class SqliteVideoRepository implements WorkerRepository {
     sourceHeight: number;
     audioAvailable: boolean;
     productAssetIds: string[];
+    productStorageKeys: string[];
     catalogTitle?: string;
     catalogCategory?: string;
     catalogBrand?: string;
@@ -878,7 +1002,14 @@ export class SqliteVideoRepository implements WorkerRepository {
     const sourceRow = this.raw.prepare("SELECT storage_key, metadata_json FROM video_assets WHERE id = ?").get(source.id) as SqlRow;
     const sourceMetadata = parseJson<Record<string, unknown>>(sourceRow.metadata_json, {});
     const sourceStorageKey = nullableString(sourceRow.storage_key);
-    if (!sourceStorageKey || !source.duration_ms || !source.width || !source.height) {
+    const productStorageKeys = productAssetIds.map((assetId) => {
+      const row = this.raw.prepare("SELECT storage_key FROM video_assets WHERE id = ?").get(assetId) as SqlRow | undefined;
+      return row ? nullableString(row.storage_key) : null;
+    });
+    if (
+      !sourceStorageKey || !source.duration_ms || !source.width || !source.height ||
+      productStorageKeys.some((storageKey) => storageKey === null)
+    ) {
       throw new VideoDomainError({ code: "SOURCE_FILE_INVALID", message: "Verified video metadata is missing" });
     }
     const catalog = parseJson<CatalogContext | null>(project.catalog_snapshot_json, null);
@@ -896,6 +1027,7 @@ export class SqliteVideoRepository implements WorkerRepository {
       sourceHeight: source.height,
       audioAvailable: sourceMetadata.has_audio === true,
       productAssetIds,
+      productStorageKeys: productStorageKeys as string[],
     };
     if (catalog?.title) result.catalogTitle = catalog.title;
     if (catalog?.category) result.catalogCategory = catalog.category;
@@ -1238,6 +1370,7 @@ export class SqliteVideoRepository implements WorkerRepository {
     generation: number;
     imagePrompt: string;
     negativePrompt: string;
+    productStorageKeys: string[];
   } {
     const targetSceneId = this.raw.prepare("SELECT target_id FROM video_jobs WHERE id = ?").get(job.id) as SqlRow | undefined;
     const sceneId = targetSceneId ? String(targetSceneId.target_id) : "";
@@ -1250,6 +1383,16 @@ export class SqliteVideoRepository implements WorkerRepository {
       .get(sceneId, job.project_id) as SqlRow | undefined;
     if (!actual) throw new VideoDomainError({ code: "SCENE_NOT_FOUND", message: "Storyboard scene not found", statusCode: 404 });
     const data = parseJson<Record<string, unknown>>(actual.data_json, {});
+    const productStorageKeys = (
+      this.raw
+        .prepare(`
+          SELECT a.storage_key FROM video_assets a
+          JOIN video_project_assets pa ON pa.asset_id = a.id
+          WHERE pa.project_id = ? AND pa.role = 'product_image' AND a.status = 'ready' AND a.storage_key IS NOT NULL
+          ORDER BY pa.sort_order, a.created_at
+        `)
+        .all(job.project_id) as SqlRow[]
+    ).map((row) => String(row.storage_key));
     return {
       projectId: job.project_id,
       sceneId,
@@ -1257,6 +1400,7 @@ export class SqliteVideoRepository implements WorkerRepository {
       generation: Number(actual.generation),
       imagePrompt: String(data.image_prompt ?? data.prompt ?? ""),
       negativePrompt: String(data.negative_prompt ?? "logos, watermarks, copied identity, unsupported claims"),
+      productStorageKeys,
     };
   }
 
@@ -1549,14 +1693,20 @@ export class SqliteVideoRepository implements WorkerRepository {
           this.raw
             .prepare(`
               UPDATE video_jobs SET status = 'running',
-                attempt = CASE WHEN started_at IS NULL THEN attempt + 1 ELSE attempt END,
+                attempt = attempt + 1,
                 started_at = COALESCE(started_at, ?), lease_owner = ?, lease_expires_at = ?,
-                heartbeat_at = ?, progress_stage = 'starting', updated_at = ?
+                heartbeat_at = ?, provider_request_id = NULL,
+                progress_stage = 'starting', error_code = NULL, error_message = NULL,
+                error_retryable = NULL, updated_at = ?
               WHERE id = ? AND status IN ('queued', 'retry_wait')
             `)
             .run(timestamp, workerId, leaseExpiresAt, timestamp, timestamp, jobId);
           this.raw
-            .prepare("UPDATE video_job_steps SET status = 'running', attempt = attempt + 1, updated_at = ? WHERE job_id = ? AND status = 'queued'")
+            .prepare(`
+              UPDATE video_job_steps SET status = 'running', attempt = attempt + 1,
+                error_code = NULL, error_message = NULL, updated_at = ?
+              WHERE job_id = ? AND status IN ('queued', 'running')
+            `)
             .run(timestamp, jobId);
           if (String(row.type) === "scene_storyboard") {
             this.raw
@@ -1617,8 +1767,20 @@ export class SqliteVideoRepository implements WorkerRepository {
   complete(job: WorkerClaimedJob, workerId: string, value: unknown): boolean {
     if (job.type === "scene_storyboard") return this.completeSceneGeneration(job, workerId, value);
     if (job.type === "prompt_package_export") return this.completePromptPackageExport(job, workerId, value);
-    assertPrototypeAnalysisResult(value);
-    const result = value;
+    const wrapped = value && typeof value === "object" && (value as { kind?: unknown }).kind === "prototype_analysis"
+      ? value as PrototypeAnalysisWorkerResult
+      : null;
+    const result = wrapped?.result ?? value;
+    assertPrototypeAnalysisResult(result);
+    const providerMetadata = wrapped ?? {
+      provider: "fake",
+      model: "deterministic-prototype-v2",
+      providerRequestId: null,
+      usage: {},
+      estimatedCostMicros: 0,
+      latencyMs: 0,
+      safety: { mode: "legacy" },
+    };
     const promoted = this.database.transaction(() => {
       const current = this.raw.prepare("SELECT * FROM video_jobs WHERE id = ?").get(job.id) as SqlRow | undefined;
       if (!current || String(current.status) !== "running" || String(current.lease_owner) !== workerId) return false;
@@ -1770,29 +1932,39 @@ export class SqliteVideoRepository implements WorkerRepository {
       this.raw
         .prepare(`
           INSERT INTO video_provider_runs(
-            id, job_id, capability, provider, model, provider_request_id,
-            input_hash, output_hash, created_at, finished_at
-          ) VALUES (?, ?, 'prototype_analysis', 'fake', 'deterministic-prototype-v2', ?, ?, ?, ?, ?)
+            id, job_id, capability, provider, model, provider_request_id, duration_ms,
+            input_hash, output_hash, status, usage_json, estimated_cost_micros,
+            latency_ms, safety_json, created_at, finished_at
+          ) VALUES (?, ?, 'prototype_analysis', ?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?)
         `)
         .run(
           randomUUID(),
           job.id,
-          nullableString(current.provider_request_id),
+          providerMetadata.provider,
+          providerMetadata.model,
+          providerMetadata.providerRequestId ?? nullableString(current.provider_request_id),
+          providerMetadata.latencyMs,
           job.input_fingerprint,
           sha256Fingerprint(result),
+          JSON.stringify(providerMetadata.usage),
+          providerMetadata.estimatedCostMicros,
+          providerMetadata.latencyMs,
+          JSON.stringify(providerMetadata.safety),
           timestamp,
           timestamp,
         );
       this.raw
         .prepare(`
-          UPDATE video_job_steps SET status = 'succeeded', output_json = ?, updated_at = ?
+          UPDATE video_job_steps SET status = 'succeeded', output_json = ?,
+            error_code = NULL, error_message = NULL, updated_at = ?
           WHERE job_id = ?
         `)
         .run(JSON.stringify(result.summary), timestamp, job.id);
       this.raw
         .prepare(`
           UPDATE video_jobs SET status = 'succeeded', progress_stage = 'completed',
-            lease_owner = NULL, lease_expires_at = NULL, finished_at = ?, updated_at = ?
+            lease_owner = NULL, lease_expires_at = NULL, error_code = NULL,
+            error_message = NULL, error_retryable = NULL, finished_at = ?, updated_at = ?
           WHERE id = ?
         `)
         .run(timestamp, timestamp, job.id);
@@ -1909,12 +2081,16 @@ export class SqliteVideoRepository implements WorkerRepository {
           timestamp,
           timestamp,
         );
-      this.raw.prepare("UPDATE video_job_steps SET status = 'succeeded', output_json = ?, updated_at = ? WHERE job_id = ?")
+      this.raw.prepare(`
+        UPDATE video_job_steps SET status = 'succeeded', output_json = ?,
+          error_code = NULL, error_message = NULL, updated_at = ? WHERE job_id = ?
+      `)
         .run(JSON.stringify({ asset_id: assetId, qc: result.qc }), timestamp, job.id);
       this.raw
         .prepare(`
           UPDATE video_jobs SET status = 'succeeded', progress_stage = 'completed', lease_owner = NULL,
-            lease_expires_at = NULL, finished_at = ?, updated_at = ? WHERE id = ?
+            lease_expires_at = NULL, error_code = NULL, error_message = NULL,
+            error_retryable = NULL, finished_at = ?, updated_at = ? WHERE id = ?
         `)
         .run(timestamp, timestamp, job.id);
       this.settleReservation(job.id, 1, timestamp);
@@ -1975,12 +2151,16 @@ export class SqliteVideoRepository implements WorkerRepository {
             ready_at = ?, updated_at = ? WHERE id = ?
         `)
         .run(JSON.stringify(result.manifest), assetId, timestamp, timestamp, result.exportId);
-      this.raw.prepare("UPDATE video_job_steps SET status = 'succeeded', output_json = ?, updated_at = ? WHERE job_id = ?")
+      this.raw.prepare(`
+        UPDATE video_job_steps SET status = 'succeeded', output_json = ?,
+          error_code = NULL, error_message = NULL, updated_at = ? WHERE job_id = ?
+      `)
         .run(JSON.stringify({ export_id: result.exportId, asset_id: assetId }), timestamp, job.id);
       this.raw
         .prepare(`
           UPDATE video_jobs SET status = 'succeeded', progress_stage = 'completed', lease_owner = NULL,
-            lease_expires_at = NULL, finished_at = ?, updated_at = ? WHERE id = ?
+            lease_expires_at = NULL, error_code = NULL, error_message = NULL,
+            error_retryable = NULL, finished_at = ?, updated_at = ? WHERE id = ?
         `)
         .run(timestamp, timestamp, job.id);
       this.settleReservation(job.id, 0, timestamp);
@@ -1999,7 +2179,8 @@ export class SqliteVideoRepository implements WorkerRepository {
       const current = this.raw.prepare("SELECT * FROM video_jobs WHERE id = ?").get(job.id) as SqlRow | undefined;
       if (!current || String(current.status) !== "running" || String(current.lease_owner) !== workerId) return false;
       const timestamp = nowIso();
-      if (failure.providerOutcomeUnknown) {
+      const canRetry = Number(current.attempt) < Number(current.max_attempts);
+      if (failure.providerOutcomeUnknown && canRetry) {
         this.raw
           .prepare(`
             UPDATE video_jobs SET status = 'retry_wait', next_run_at = ?, lease_owner = NULL,
@@ -2009,6 +2190,12 @@ export class SqliteVideoRepository implements WorkerRepository {
           `)
           .run(new Date(Date.now() + 60_000).toISOString(), failure.message, timestamp, job.id);
         this.raw
+          .prepare(`
+            UPDATE video_job_steps SET status = 'queued', error_code = ?, error_message = ?, updated_at = ?
+            WHERE job_id = ? AND status = 'running'
+          `)
+          .run(failure.code, failure.message, timestamp, job.id);
+        this.raw
           .prepare("UPDATE video_usage_reservations SET status = 'reconciling', reason = ?, updated_at = ? WHERE job_id = ? AND status = 'held'")
           .run(failure.code, timestamp, job.id);
         this.writeEvent(job.project_id, "job.reconciling", {
@@ -2017,7 +2204,7 @@ export class SqliteVideoRepository implements WorkerRepository {
         }, timestamp);
         return true;
       }
-      const retry = failure.retryable && Number(current.attempt) < Number(current.max_attempts);
+      const retry = failure.retryable && canRetry;
       if (retry) {
         const delay = Math.min(60_000, 1_000 * 2 ** Math.max(0, Number(current.attempt) - 1));
         this.raw
@@ -2027,6 +2214,12 @@ export class SqliteVideoRepository implements WorkerRepository {
               progress_stage = 'retry_wait', updated_at = ? WHERE id = ?
           `)
           .run(new Date(Date.now() + delay).toISOString(), failure.code, failure.message, timestamp, job.id);
+        this.raw
+          .prepare(`
+            UPDATE video_job_steps SET status = 'queued', error_code = ?, error_message = ?, updated_at = ?
+            WHERE job_id = ? AND status = 'running'
+          `)
+          .run(failure.code, failure.message, timestamp, job.id);
       } else {
         this.raw
           .prepare(`
@@ -2328,6 +2521,15 @@ export class SqliteVideoRepository implements WorkerRepository {
       .get(jobId) as SqlRow | undefined;
     if (!reservation) return false;
     if (String(reservation.status) === "held") return true;
+    if (String(reservation.status) === "reconciling") {
+      const result = this.raw
+        .prepare(`
+          UPDATE video_usage_reservations SET status = 'held', reason = NULL, updated_at = ?
+          WHERE job_id = ? AND status = 'reconciling'
+        `)
+        .run(timestamp, jobId);
+      return result.changes === 1;
+    }
     if (String(reservation.status) !== "released") return false;
     try {
       this.reserveBudget(

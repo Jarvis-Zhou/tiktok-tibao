@@ -4,6 +4,7 @@ import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { TikTokShopAuthClient } from "@tibao/tiktok-api";
 import { loadConfig, loadRootEnvironment, validateVideoConfig } from "./config.js";
+import { corsOptionsDelegate } from "./cors.js";
 import { TibaoDatabase } from "./database.js";
 import { registerRoutes } from "./routes.js";
 import { ApiRunner } from "./runner.js";
@@ -24,17 +25,7 @@ const oauthClient = new TikTokShopAuthClient({
 const app = Fastify({ logger: true, bodyLimit: 6 * 1024 * 1024 });
 
 await app.register(cors, {
-  origin(origin, callback) {
-    if (
-      !origin ||
-      origin.startsWith("chrome-extension://") ||
-      /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)
-    ) {
-      callback(null, true);
-      return;
-    }
-    callback(new Error("Origin not allowed"), false);
-  },
+  delegator: corsOptionsDelegate,
 });
 await app.register(multipart, {
   limits: { files: 1, fileSize: 5 * 1024 * 1024, fields: 10 },

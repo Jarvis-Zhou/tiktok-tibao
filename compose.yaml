@@ -1,0 +1,62 @@
+name: tibao
+
+services:
+  server:
+    image: tiktok-tibao:phase-b
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3210
+      DATABASE_PATH: /data/tibao.sqlite
+      VIDEO_ALLOW_NON_LOOPBACK_HOST: "true"
+      VIDEO_STORAGE_ROOT: /data/video-assets
+      VIDEO_TEMP_ROOT: /data/video-tmp
+      VIDEO_WORKER_MODE: embedded
+      VIDEO_FFMPEG_PATH: /usr/bin/ffmpeg
+      VIDEO_FFPROBE_PATH: /usr/bin/ffprobe
+      VIDEO_LOCAL_ASR_BASE_URL: ${TIBAO_ASR_INTERNAL_BASE_URL:-http://local-asr:8000/v1}
+    ports:
+      - "${TIBAO_BIND_ADDRESS:-127.0.0.1}:${TIBAO_PORT:-3210}:3210"
+    volumes:
+      - tibao-data:/data
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+  local-asr:
+    profiles: ["local-asr"]
+    image: tiktok-tibao-local-asr:small-cpu
+    build:
+      context: .
+      dockerfile: services/local-asr/Dockerfile
+      args:
+        PYTHON_IMAGE: ${TIBAO_PYTHON_IMAGE:-python:3.11-slim-bookworm}
+        PIP_INDEX_URL: ${TIBAO_PIP_INDEX_URL:-https://pypi.org/simple}
+    environment:
+      ASR_MODEL: ${VIDEO_LOCAL_ASR_MODEL:-small}
+      ASR_DEVICE: cpu
+      ASR_COMPUTE_TYPE: int8
+      ASR_API_KEY: ${VIDEO_LOCAL_ASR_API_KEY:-}
+      ASR_CPU_THREADS: ${TIBAO_ASR_CPU_THREADS:-4}
+      ASR_MAX_CONCURRENCY: 1
+      ASR_MAX_FILE_BYTES: ${TIBAO_ASR_MAX_FILE_BYTES:-52428800}
+      ASR_VAD_FILTER: "true"
+      HF_ENDPOINT: ${TIBAO_HF_ENDPOINT:-https://huggingface.co}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_DOWNLOAD_TIMEOUT: ${TIBAO_HF_DOWNLOAD_TIMEOUT:-300}
+      HF_HUB_ETAG_TIMEOUT: ${TIBAO_HF_ETAG_TIMEOUT:-30}
+    ports:
+      - "127.0.0.1:${TIBAO_ASR_PORT:-8001}:8000"
+    volumes:
+      - tibao-asr-models:/models
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  tibao-data:
+  tibao-asr-models:

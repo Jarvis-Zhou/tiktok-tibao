@@ -110,3 +110,33 @@
   width: 22px;
   height: 22px;
 }
+
+.reference-frame.real-source {
+  background: #090d15;
+}
+
+.reference-frame.real-source video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.reference-frame.real-source .ref-play {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.reference-frame.reference-missing {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: #9aa6b8;
+  background: #151d2c;
+}
+
+.reference-frame.reference-missing > span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+}

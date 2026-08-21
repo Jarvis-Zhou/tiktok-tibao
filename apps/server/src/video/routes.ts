@@ -210,6 +210,33 @@ function sendProject(reply: FastifyReply, project: { revision: number }, body: u
   return reply.header("etag", etag(project.revision)).send(body);
 }
 
+export function handleVideoRouteError(error: Error, request: FastifyRequest, reply: FastifyReply): void {
+  if (error instanceof VideoDomainError) {
+    void reply.code(error.statusCode).send(error.toBody(request.id));
+    return;
+  }
+
+  const errorWithHttpStatus = error as Error & { code?: unknown; statusCode?: unknown };
+  const statusCode = Number(errorWithHttpStatus.statusCode);
+  if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
+    const code =
+      typeof errorWithHttpStatus.code === "string" && errorWithHttpStatus.code
+        ? errorWithHttpStatus.code
+        : "INVALID_REQUEST";
+    void reply.code(statusCode).send({
+      error: { code, message: error.message, retryable: false },
+      request_id: request.id,
+    });
+    return;
+  }
+
+  request.log.error({ err: error }, "video request failed");
+  void reply.code(500).send({
+    error: { code: "INTERNAL_ERROR", message: "Video service failed", retryable: false },
+    request_id: request.id,
+  });
+}
+
 export async function registerVideoRoutes(
   app: FastifyInstance,
   dependencies: VideoRouteDependencies,
@@ -230,23 +257,20 @@ export async function registerVideoRoutes(
         done(null, payload);
       });
 
-      videoApp.setErrorHandler((error, request, reply) => {
-        if (error instanceof VideoDomainError) {
-          void reply.code(error.statusCode).send(error.toBody(request.id));
-          return;
-        }
-        request.log.error({ err: error }, "video request failed");
-        void reply.code(500).send({
-          error: { code: "INTERNAL_ERROR", message: "Video service failed", retryable: false },
-          request_id: request.id,
-        });
-      });
+      videoApp.setErrorHandler(handleVideoRouteError);
 
       videoApp.get("/health", async () => ({
         ok: true,
         mode: "alpha",
         worker_mode: module.config.workerMode,
-        provider: module.config.fakeProvider ? "fake" : "unconfigured",
+        provider: module.config.provider,
+        analysis_api: module.config.provider === "fake" ? null : module.config.analysisApi,
+        reasoning_effort: module.config.provider === "fake" ? null : module.config.analysisReasoningEffort,
+        analysis_model: module.config.provider === "fake" ? "deterministic-prototype-v2" : module.config.analysisModel,
+        storyboard_provider: module.config.storyboardProvider,
+        storyboard_model: module.config.storyboardProvider === "fake" ? "deterministic-storyboard-v1" : module.config.storyboardModel,
+        transcription_provider: module.config.transcriptionProvider,
+        transcription_model: module.config.transcriptionProvider === "disabled" ? null : module.config.transcriptionModel,
         allowed_markets: module.config.allowedMarkets,
         allowed_languages: module.config.allowedLanguages,
       }));

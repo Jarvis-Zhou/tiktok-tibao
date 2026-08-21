@@ -19,7 +19,8 @@ test("fake provider emits a deterministic six-scene schema-valid storyboard", as
     },
     new AbortController().signal,
   );
-  assertPrototypeAnalysisResult(result);
-  assert.equal(result.scenes.length, 6);
-  assert.match(result.scenes[2]?.headline ?? "", /Portable Blender/);
+  assertPrototypeAnalysisResult(result.value);
+  assert.equal(result.provider, "fake");
+  assert.equal(result.value.scenes.length, 6);
+  assert.match(result.value.scenes[2]?.headline ?? "", /Portable Blender/);
 });

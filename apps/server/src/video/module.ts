@@ -1,4 +1,12 @@
-import { FakeStoryboardImageProvider, FakeVideoProvider, ProviderRegistry, validateStructuredOutput } from "@tibao/ai-providers";
+import {
+  FakeStoryboardImageProvider,
+  FakeVideoProvider,
+  OpenAiCompatibleAnalysisProvider,
+  OpenAiCompatibleStoryboardProvider,
+  ProviderRegistry,
+  providerTraceId,
+  validateStructuredOutput,
+} from "@tibao/ai-providers";
 import { assertPrototypeAnalysisResult } from "@tibao/video-core";
 import { VideoWorkerRuntime, type WorkerHandler } from "@tibao/video-worker";
 import type { AppConfig, VideoConfig } from "../config.js";
@@ -71,10 +79,33 @@ export class VideoModule {
       config.eventPollIdleMs,
       (error) => logger.error({ err: error }, "video event dispatcher failed"),
     );
-    if (!config.fakeProvider) {
-      throw new Error("Phase A requires VIDEO_FAKE_PROVIDER=true until a real provider is configured");
-    }
-    const providers = new ProviderRegistry(new FakeVideoProvider(), new FakeStoryboardImageProvider());
+    const providerOptions = {
+      baseUrl: config.providerBaseUrl,
+      apiKey: config.providerApiKey,
+      analysisModel: config.analysisModel,
+      ...(config.storyboardModel ? { imageModel: config.storyboardModel } : {}),
+      analysisApi: config.analysisApi,
+      reasoningEffort: config.analysisReasoningEffort,
+      ...(config.transcriptionProvider === "disabled"
+        ? {}
+        : {
+            transcriptionModel: config.transcriptionModel,
+            transcriptionBaseUrl: config.transcriptionBaseUrl,
+            transcriptionApiKey: config.transcriptionApiKey,
+            transcriptionProvider: config.transcriptionProvider,
+            transcriptionRequestTimeoutMs: config.transcriptionRequestTimeoutMs,
+          }),
+      requestTimeoutMs: config.providerRequestTimeoutMs,
+      maxFrames: config.providerMaxFrames,
+    } as const;
+    const providers = new ProviderRegistry(
+      config.provider === "fake"
+        ? new FakeVideoProvider()
+        : new OpenAiCompatibleAnalysisProvider(providerOptions),
+      config.storyboardProvider === "fake"
+        ? new FakeStoryboardImageProvider()
+        : new OpenAiCompatibleStoryboardProvider(providerOptions),
+    );
     const prototypeHandler: WorkerHandler = async (job, context) => {
       await context.progress("media_probe");
       const providerInput = repository.prototypeAnalysisInput(job);
@@ -83,16 +114,48 @@ export class VideoModule {
       await context.progress("frame_extraction");
       const prepared = await media.prepareSource(sourcePath, job.id, probe, context.signal);
       try {
-        await context.progress(prepared.audioPath ? "asr_unconfigured" : "asr_skipped_no_audio");
+        await context.progress(
+          prepared.audioPath
+            ? config.transcriptionProvider !== "disabled"
+              ? "transcription_and_visual_analysis"
+              : "asr_unconfigured"
+            : "asr_skipped_no_audio",
+        );
         await context.progress("visual_analysis");
-        const { sourceStorageKey: _sourceStorageKey, ...safeProviderInput } = providerInput;
-        const rawResult = await providers.prototypeAnalysis().analyze(safeProviderInput, context.signal);
+        const {
+          sourceStorageKey: _sourceStorageKey,
+          productStorageKeys,
+          ...safeProviderInput
+        } = providerInput;
+        const provider = providers.prototypeAnalysis();
+        await context.markProviderSubmitted(providerTraceId(provider.id, job.id));
+        const rawResult = await provider.analyze({
+          ...safeProviderInput,
+          sourceFramePaths: prepared.framePaths,
+          sourceContactSheetPath: prepared.contactSheetPath,
+          sourceAudioPath: prepared.audioPath,
+          productImagePaths: productStorageKeys.map((storageKey) => storage.storagePath(storageKey)),
+        }, context.signal);
         await context.progress("schema_validation");
-        return (await validateStructuredOutput({
-          value: rawResult,
+        const validated = await validateStructuredOutput({
+          value: rawResult.value,
           validate: assertPrototypeAnalysisResult,
           signal: context.signal,
-        })).value;
+        });
+        return {
+          kind: "prototype_analysis",
+          result: validated.value,
+          provider: rawResult.provider,
+          model: rawResult.model,
+          providerRequestId: rawResult.providerRequestId,
+          usage: rawResult.usage,
+          estimatedCostMicros: rawResult.estimatedCostMicros,
+          latencyMs: rawResult.latencyMs,
+          safety: {
+            ...rawResult.safety,
+            repair_attempts: validated.repairAttempts,
+          },
+        };
       } finally {
         await prepared.cleanup();
       }
@@ -101,7 +164,7 @@ export class VideoModule {
       await context.progress("reading_scene_revision");
       const input = repository.sceneGenerationInput(job);
       const provider = providers.storyboardImage();
-      await context.markProviderSubmitted(`fake:${job.id}:${input.generation}`);
+      await context.markProviderSubmitted(providerTraceId(provider.id, job.id));
       await context.progress("storyboard_image_generation");
       const generated = await provider.generate({
         projectId: input.projectId,
@@ -109,6 +172,7 @@ export class VideoModule {
         generation: input.generation,
         imagePrompt: input.imagePrompt,
         negativePrompt: input.negativePrompt,
+        productImagePaths: input.productStorageKeys.map((storageKey) => storage.storagePath(storageKey)),
         width: 180,
         height: 320,
       }, context.signal);

@@ -8,6 +8,7 @@ import type {
 } from "@tibao/video-core";
 import type {
   GeneratedStoryboardImage,
+  ProviderResult,
   PrototypeAnalysisInput,
   PrototypeAnalysisProvider,
   StoryboardImageInput,
@@ -137,7 +138,8 @@ export class FakeVideoProvider implements PrototypeAnalysisProvider {
 
   constructor(private readonly latencyMs = 25) {}
 
-  async analyze(input: PrototypeAnalysisInput, signal: AbortSignal): Promise<PrototypeAnalysisResult> {
+  async analyze(input: PrototypeAnalysisInput, signal: AbortSignal): Promise<ProviderResult<PrototypeAnalysisResult>> {
+    const startedAt = Date.now();
     if (signal.aborted) throw abortError();
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, this.latencyMs);
@@ -163,7 +165,7 @@ export class FakeVideoProvider implements PrototypeAnalysisProvider {
     const material = fact("material.primary", "needs confirmation", input, "inferred", false);
     const shape = fact("shape.primary", "product-specific", input, "observed", false);
     const colors = fact("colors.primary", ["from source images"], input, "observed", false);
-    return {
+    const value: PrototypeAnalysisResult = {
       schema_version: "prototype-analysis-v1",
       summary: {
         title: `${productName} · ${input.targetMarket} Storyboard`,
@@ -266,6 +268,16 @@ export class FakeVideoProvider implements PrototypeAnalysisProvider {
         safety_notes: ["Do not preserve the source person's identity, face, voice, logo, music, watermark, or verbatim subtitles."],
       },
       scenes,
+    };
+    return {
+      value,
+      provider: this.id,
+      model: this.model,
+      providerRequestId: `fake:${input.projectId}`,
+      usage: {},
+      estimatedCostMicros: 0,
+      latencyMs: Date.now() - startedAt,
+      safety: { mode: "fixture" },
     };
   }
 }
